@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QMessageBox, QComboBox,
                              QSystemTrayIcon, QMenu, QApplication, QScrollArea)
-from PyQt6.QtCore import pyqtSignal, QObject, Qt, QRectF, QEvent
+from PyQt6.QtCore import pyqtSignal, QObject, Qt, QRectF, QEvent, QStandardPaths
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 import sys
 import threading
 import pyautogui
 import pyperclip
 import json
+import os
 from ui.overlay import OverlayWindow
 from ui.custom_widgets import HotkeyInput
 
@@ -31,6 +32,15 @@ class MainWindow(QMainWindow):
         
         self.setWindowTitle("Gemini Voice Writer")
         self.setGeometry(100, 100, 420, 600)
+
+        # Set Window Icon
+        if hasattr(sys, "_MEIPASS"):
+            icon_path = os.path.join(sys._MEIPASS, "icon.ico")
+        else:
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icon.ico")
+            
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # Overlay
         self.overlay = OverlayWindow()
@@ -84,26 +94,26 @@ class MainWindow(QMainWindow):
         settings_layout.setSpacing(10)
         
         # API Key Input
-        api_key_label = QLabel("GEMINI API KEY")
+        api_key_label = QLabel("🔑  API Key")
         api_key_label.setObjectName("fieldLabel")
         settings_layout.addWidget(api_key_label)
         
         self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("Paste your API key here")
+        self.api_key_input.setPlaceholderText("Paste your Gemini API key")
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         settings_layout.addWidget(self.api_key_input)
 
         # Hotkey Input
-        hotkey_label = QLabel("HOTKEY SHORTCUT")
+        hotkey_label = QLabel("⌨️  Shortcut")
         hotkey_label.setObjectName("fieldLabel")
         settings_layout.addWidget(hotkey_label)
         
         self.hotkey_input = HotkeyInput()
-        self.hotkey_input.setPlaceholderText("Click to record shortcut")
+        self.hotkey_input.setPlaceholderText("Click to set shortcut")
         settings_layout.addWidget(self.hotkey_input)
 
         # Model Selection
-        model_label = QLabel("AI MODEL")
+        model_label = QLabel("🤖  Model")
         model_label.setObjectName("fieldLabel")
         settings_layout.addWidget(model_label)
         
@@ -160,12 +170,12 @@ class MainWindow(QMainWindow):
 
     def apply_styles(self):
         self.setStyleSheet("""
-            /* Main Window Background */
+            /* Main Window Background - Telegram Dark Blue/Gray */
             QMainWindow {
-                background-color: #36393f;
+                background-color: #17212b;
             }
             QWidget#centralWidget {
-                background-color: #36393f;
+                background-color: #17212b;
             }
             
             /* Scroll Area */
@@ -180,40 +190,44 @@ class MainWindow(QMainWindow):
             /* Header */
             QLabel#headerLabel {
                 color: #ffffff;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 20px;
-                font-weight: bold;
-                margin-bottom: 10px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 22px;
+                font-weight: 600;
+                margin-bottom: 15px;
             }
             
-            /* Settings Container */
+            /* Settings Container - Telegram Cell Background */
             QWidget#settingsWidget {
-                background-color: #2f3136;
-                border-radius: 8px;
+                background-color: #17212b;
+                border-radius: 10px;
             }
             
             /* Field Labels */
             QLabel#fieldLabel {
-                color: #b9bbbe;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 12px;
-                font-weight: bold;
-                text-transform: uppercase;
-                margin-top: 5px;
+                color: #7e8c9d; /* Telegram Hint Color */
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 14px;
+                font-weight: 500;
+                margin-top: 10px;
+                margin-bottom: 2px;
             }
             
-            /* Inputs */
+            /* Inputs - Telegram Style */
             QLineEdit, QComboBox, HotkeyInput {
-                background-color: #202225;
-                color: #dcddde;
-                border: 1px solid #202225;
-                border-radius: 4px;
-                padding: 10px;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 14px;
+                background-color: #17212b;
+                color: #ffffff;
+                border: none;
+                border-bottom: 1px solid #2b384d; /* Subtle separator */
+                border-radius: 0px;
+                padding: 8px 0px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 16px;
             }
             QLineEdit:focus, QComboBox:focus, HotkeyInput:focus {
-                border: 1px solid #00b0f4;
+                border-bottom: 2px solid #5288c1; /* Telegram Blue Focus */
+            }
+            QLineEdit:hover, QComboBox:hover, HotkeyInput:hover {
+                background-color: #1d2a39;
             }
             
             /* ComboBox Dropdown */
@@ -222,67 +236,82 @@ class MainWindow(QMainWindow):
                 width: 20px;
             }
             QComboBox QAbstractItemView {
-                background-color: #2f3136;
-                color: #dcddde;
-                border: 1px solid #202225;
-                selection-background-color: #40444b;
+                background-color: #242f3d;
+                color: #ffffff;
+                border: 1px solid #17212b;
+                selection-background-color: #2f3e52;
+                padding: 5px;
             }
             
-            /* Primary Button (Save) */
+            /* Model Description */
+            QLabel#descLabel {
+                color: #7e8c9d;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 13px;
+                line-height: 1.4;
+                padding-top: 5px;
+            }
+
+            /* Primary Button (Save) - Telegram Blue */
             QPushButton#primaryButton {
-                background-color: #5865F2;
+                background-color: #5288c1;
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 10px;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 14px;
-                font-weight: bold;
+                border-radius: 8px;
+                padding: 12px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 15px;
+                font-weight: 600;
+                margin-top: 10px;
             }
             QPushButton#primaryButton:hover {
-                background-color: #4752C4;
+                background-color: #467ab3;
             }
             QPushButton#primaryButton:pressed {
-                background-color: #3c45a5;
+                background-color: #3a6ba5;
             }
             
             /* Record Button (Green/Red) */
             QPushButton#recordButton {
-                background-color: #3ba55c;
+                background-color: #3ba55c; /* Telegram Green (ish) */
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 12px;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
-                font-size: 15px;
+                border-radius: 8px;
+                padding: 14px;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 16px;
                 font-weight: bold;
             }
             QPushButton#recordButton:hover {
                 background-color: #2d7d46;
             }
             QPushButton#recordButton:checked {
-                background-color: #ed4245;
+                background-color: #e53935; /* Red */
+            }
+            QPushButton#recordButton:checked:hover {
+                background-color: #d32f2f;
             }
             
             /* Status Label */
             QLabel#statusLabel {
-                color: #96989d;
-                font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;
+                color: #7e8c9d;
+                font-family: 'Segoe UI', sans-serif;
                 font-size: 13px;
-                font-weight: bold;
+                font-weight: 500;
+                margin-bottom: 5px;
             }
             
-            /* Scrollbars */
+            /* Scrollbars - Minimal Dark */
             QScrollBar:vertical {
                 border: none;
-                background: #2f3136;
-                width: 10px;
+                background: #17212b;
+                width: 8px;
                 margin: 0px;
             }
             QScrollBar::handle:vertical {
-                background: #202225;
+                background: #2f3e52;
                 min-height: 20px;
-                border-radius: 5px;
+                border-radius: 4px;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 border: none;
@@ -293,15 +322,24 @@ class MainWindow(QMainWindow):
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
         
-        # Create a simple icon programmatically
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setBrush(QColor(0, 120, 215)) # Blue
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 28, 28)
-        painter.end()
-        self.tray_icon.setIcon(QIcon(pixmap))
+        # Set Tray Icon
+        if hasattr(sys, "_MEIPASS"):
+            icon_path = os.path.join(sys._MEIPASS, "icon.ico")
+        else:
+            icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "icon.ico")
+
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+        else:
+            # Fallback to programmatic icon
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setBrush(QColor(0, 120, 215)) # Blue
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(2, 2, 28, 28)
+            painter.end()
+            self.tray_icon.setIcon(QIcon(pixmap))
         
         # Tray Menu
         menu = QMenu()
@@ -485,30 +523,45 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Ошибка: {message}")
         self.overlay.hide_overlay()
 
+    def get_settings_path(self):
+        # Get standard app data location
+        app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
+        # Ensure directory exists
+        if not os.path.exists(app_data):
+            os.makedirs(app_data, exist_ok=True)
+        return os.path.join(app_data, "settings.json")
+
     def save_settings(self):
         settings = {
             "api_key": self.api_key_input.text(),
             "hotkey": self.hotkey_input.text(),
             "model": self.model_input.currentData() 
         }
-        with open("settings.json", "w") as f:
-            json.dump(settings, f)
         
-        self.update_hotkey_listener()
-        QMessageBox.information(self, "Settings", "Settings saved.")
+        try:
+            settings_path = self.get_settings_path()
+            with open(settings_path, "w") as f:
+                json.dump(settings, f)
+            
+            self.update_hotkey_listener()
+            QMessageBox.information(self, "Settings", f"Settings saved to:\n{settings_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
 
     def load_settings(self):
         try:
-            with open("settings.json", "r") as f:
-                settings = json.load(f)
-                self.api_key_input.setText(settings.get("api_key", ""))
-                self.hotkey_input.setText(settings.get("hotkey", "alt+1"))
-                
-                model_id = settings.get("model", "gemini-2.5-flash")
-                # Find by data
-                index = self.model_input.findData(model_id)
-                if index >= 0:
-                    self.model_input.setCurrentIndex(index)
+            settings_path = self.get_settings_path()
+            if os.path.exists(settings_path):
+                with open(settings_path, "r") as f:
+                    settings = json.load(f)
+                    self.api_key_input.setText(settings.get("api_key", ""))
+                    self.hotkey_input.setText(settings.get("hotkey", "alt+1"))
+                    
+                    model_id = settings.get("model", "gemini-2.5-flash")
+                    # Find by data
+                    index = self.model_input.findData(model_id)
+                    if index >= 0:
+                        self.model_input.setCurrentIndex(index)
             
             # Update description initially
             self.update_model_description()

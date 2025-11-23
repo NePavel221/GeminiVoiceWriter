@@ -3,10 +3,14 @@ import wave
 import threading
 import os
 import time
+import tempfile
 
 class AudioRecorder:
-    def __init__(self, output_filename="temp_audio.wav"):
-        self.output_filename = output_filename
+    def __init__(self, output_filename=None):
+        if output_filename is None:
+            self.output_filename = os.path.join(tempfile.gettempdir(), "GeminiVoiceWriter_audio.wav")
+        else:
+            self.output_filename = output_filename
         self.is_recording = False
         self.frames = []
         self.audio = pyaudio.PyAudio()

@@ -15,7 +15,7 @@ debug_start.log
 check_models.py
 models_list.txt
 venv/
+.venv/
 env/
 dist/
 build/
-*.spec

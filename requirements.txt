@@ -1,0 +1,6 @@
+google-generativeai
+pyaudio
+keyboard
+pyautogui
+pyperclip
+PyQt6

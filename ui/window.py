@@ -1,12 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QMessageBox, QComboBox,
-                             QSystemTrayIcon, QMenu, QApplication, QScrollArea)
+                             QSystemTrayIcon, QMenu, QApplication, QScrollArea, QCheckBox)
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QRectF, QEvent, QStandardPaths
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 import sys
 import threading
+import time
 import pyautogui
 import pyperclip
+import keyboard
 import json
 import os
 from ui.overlay import OverlayWindow
@@ -141,6 +143,19 @@ class MainWindow(QMainWindow):
         self.model_desc_label.setOpenExternalLinks(True)
         self.model_desc_label.setStyleSheet("color: #b9bbbe; font-size: 12px; margin-top: 5px;")
         settings_layout.addWidget(self.model_desc_label)
+
+        # Visual Settings
+        visual_label = QLabel("👁️  Visuals")
+        visual_label.setObjectName("fieldLabel")
+        settings_layout.addWidget(visual_label)
+
+        self.show_overlay_checkbox = QCheckBox("Show Animation Overlay")
+        self.show_overlay_checkbox.setChecked(True)
+        settings_layout.addWidget(self.show_overlay_checkbox)
+
+        self.show_cost_checkbox = QCheckBox("Show Cost in Overlay")
+        self.show_cost_checkbox.setChecked(True)
+        settings_layout.addWidget(self.show_cost_checkbox)
         
         # Add stretch to settings layout
         settings_layout.addStretch()
@@ -169,51 +184,59 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.record_btn)
 
     def apply_styles(self):
-        self.setStyleSheet("""
+        # Resolve checkmark path
+        if hasattr(sys, "_MEIPASS"):
+            checkmark_path = os.path.join(sys._MEIPASS, "ui", "checkmark.svg")
+        else:
+            checkmark_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkmark.svg")
+            
+        checkmark_path = checkmark_path.replace("\\", "/")
+
+        self.setStyleSheet(f"""
             /* Main Window Background - Telegram Dark Blue/Gray */
-            QMainWindow {
+            QMainWindow {{
                 background-color: #17212b;
-            }
-            QWidget#centralWidget {
+            }}
+            QWidget#centralWidget {{
                 background-color: #17212b;
-            }
+            }}
             
             /* Scroll Area */
-            QScrollArea#settingsScrollArea {
+            QScrollArea#settingsScrollArea {{
                 border: none;
                 background-color: transparent;
-            }
-            QScrollArea > QWidget > QWidget {
+            }}
+            QScrollArea > QWidget > QWidget {{
                 background-color: transparent;
-            }
+            }}
             
             /* Header */
-            QLabel#headerLabel {
+            QLabel#headerLabel {{
                 color: #ffffff;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 22px;
                 font-weight: 600;
                 margin-bottom: 15px;
-            }
+            }}
             
             /* Settings Container - Telegram Cell Background */
-            QWidget#settingsWidget {
+            QWidget#settingsWidget {{
                 background-color: #17212b;
                 border-radius: 10px;
-            }
+            }}
             
             /* Field Labels */
-            QLabel#fieldLabel {
+            QLabel#fieldLabel {{
                 color: #7e8c9d; /* Telegram Hint Color */
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 14px;
                 font-weight: 500;
                 margin-top: 10px;
                 margin-bottom: 2px;
-            }
+            }}
             
             /* Inputs - Telegram Style */
-            QLineEdit, QComboBox, HotkeyInput {
+            QLineEdit, QComboBox, HotkeyInput, QCheckBox {{
                 background-color: #17212b;
                 color: #ffffff;
                 border: none;
@@ -222,38 +245,59 @@ class MainWindow(QMainWindow):
                 padding: 8px 0px;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 16px;
-            }
-            QLineEdit:focus, QComboBox:focus, HotkeyInput:focus {
+            }}
+            QLineEdit:focus, QComboBox:focus, HotkeyInput:focus {{
                 border-bottom: 2px solid #5288c1; /* Telegram Blue Focus */
-            }
-            QLineEdit:hover, QComboBox:hover, HotkeyInput:hover {
+            }}
+            QLineEdit:hover, QComboBox:hover, HotkeyInput:hover {{
                 background-color: #1d2a39;
-            }
+            }}
+
+            /* Checkbox */
+            QCheckBox {{
+                color: #ffffff;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 15px;
+                spacing: 8px;
+                padding: 5px 0px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 1px solid #6c7883;
+                background-color: transparent;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #5288c1;
+                border-color: #5288c1;
+                image: url({checkmark_path});
+            }}
             
             /* ComboBox Dropdown */
-            QComboBox::drop-down {
+            QComboBox::drop-down {{
                 border: none;
                 width: 20px;
-            }
-            QComboBox QAbstractItemView {
+            }}
+            QComboBox QAbstractItemView {{
                 background-color: #242f3d;
                 color: #ffffff;
                 border: 1px solid #17212b;
                 selection-background-color: #2f3e52;
                 padding: 5px;
-            }
+            }}
             
             /* Model Description */
-            QLabel#descLabel {
+            QLabel#descLabel {{
                 color: #7e8c9d;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 13px;
                 line-height: 1.4;
                 padding-top: 5px;
-            }
+            }}
 
             /* Primary Button (Save) - Telegram Blue */
-            QPushButton#primaryButton {
+            QPushButton#primaryButton {{
                 background-color: #5288c1;
                 color: white;
                 border: none;
@@ -263,16 +307,16 @@ class MainWindow(QMainWindow):
                 font-size: 15px;
                 font-weight: 600;
                 margin-top: 10px;
-            }
-            QPushButton#primaryButton:hover {
+            }}
+            QPushButton#primaryButton:hover {{
                 background-color: #467ab3;
-            }
-            QPushButton#primaryButton:pressed {
+            }}
+            QPushButton#primaryButton:pressed {{
                 background-color: #3a6ba5;
-            }
+            }}
             
             /* Record Button (Green/Red) */
-            QPushButton#recordButton {
+            QPushButton#recordButton {{
                 background-color: #3ba55c; /* Telegram Green (ish) */
                 color: white;
                 border: none;
@@ -281,42 +325,42 @@ class MainWindow(QMainWindow):
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 16px;
                 font-weight: bold;
-            }
-            QPushButton#recordButton:hover {
+            }}
+            QPushButton#recordButton:hover {{
                 background-color: #2d7d46;
-            }
-            QPushButton#recordButton:checked {
+            }}
+            QPushButton#recordButton:checked {{
                 background-color: #e53935; /* Red */
-            }
-            QPushButton#recordButton:checked:hover {
+            }}
+            QPushButton#recordButton:checked:hover {{
                 background-color: #d32f2f;
-            }
+            }}
             
             /* Status Label */
-            QLabel#statusLabel {
+            QLabel#statusLabel {{
                 color: #7e8c9d;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 13px;
                 font-weight: 500;
                 margin-bottom: 5px;
-            }
+            }}
             
             /* Scrollbars - Minimal Dark */
-            QScrollBar:vertical {
+            QScrollBar:vertical {{
                 border: none;
                 background: #17212b;
                 width: 8px;
                 margin: 0px;
-            }
-            QScrollBar::handle:vertical {
+            }}
+            QScrollBar::handle:vertical {{
                 background: #2f3e52;
                 min-height: 20px;
                 border-radius: 4px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 border: none;
                 background: none;
-            }
+            }}
         """)
 
     def init_tray(self):
@@ -443,7 +487,8 @@ class MainWindow(QMainWindow):
             self.recorder.start_recording()
             self.record_btn.setText("Stop Recording (Manual)")
             # Show Overlay
-            self.overlay.show_recording()
+            if self.show_overlay_checkbox.isChecked():
+                self.overlay.show_recording()
         except Exception as e:
             print(f"UI: Error starting recorder: {e}")
             self.signals.error.emit(f"Failed to start recording: {e}")
@@ -460,7 +505,8 @@ class MainWindow(QMainWindow):
             self.record_btn.setText("Start Recording")
             
             # Show Overlay Loading
-            self.overlay.show_transcribing()
+            if self.show_overlay_checkbox.isChecked():
+                self.overlay.show_transcribing()
             
             if audio_file:
                 # Start transcription in a separate thread
@@ -507,8 +553,20 @@ class MainWindow(QMainWindow):
         
         try:
             pyperclip.copy(text)
+            # Ensure modifiers are released before pasting
+            keyboard.release('alt')
+            keyboard.release('ctrl')
+            keyboard.release('shift')
+            
+            # Small delay to ensure clipboard is updated and system is ready
+            time.sleep(0.5)
             pyautogui.hotkey('ctrl', 'v')
-            self.overlay.show_success(f"{duration:.1f}s\n${cost:.6f}")
+            
+            if self.show_overlay_checkbox.isChecked():
+                stats = ""
+                if self.show_cost_checkbox.isChecked():
+                    stats = f"${cost:.5f}"
+                self.overlay.show_success(stats)
         except Exception as e:
             self.on_error(f"Paste failed: {e}")
             
@@ -535,7 +593,9 @@ class MainWindow(QMainWindow):
         settings = {
             "api_key": self.api_key_input.text(),
             "hotkey": self.hotkey_input.text(),
-            "model": self.model_input.currentData() 
+            "model": self.model_input.currentData(),
+            "show_overlay": self.show_overlay_checkbox.isChecked(),
+            "show_cost": self.show_cost_checkbox.isChecked()
         }
         
         try:
@@ -562,6 +622,9 @@ class MainWindow(QMainWindow):
                     index = self.model_input.findData(model_id)
                     if index >= 0:
                         self.model_input.setCurrentIndex(index)
+                        
+                    self.show_overlay_checkbox.setChecked(settings.get("show_overlay", True))
+                    self.show_cost_checkbox.setChecked(settings.get("show_cost", True))
             
             # Update description initially
             self.update_model_description()

@@ -11,7 +11,7 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         
         # Fixed size for the bubble
-        self.setFixedSize(160, 120)
+        self.setFixedSize(64, 64)
         
         # Position bottom right
         self.update_position()
@@ -91,44 +91,65 @@ class OverlayWindow(QWidget):
         
         center_x = self.width() / 2
         center_y = self.height() / 2
-        radius = 30
-
+        
+        # Scale factor approx 0.4 (1/2.5)
+        # Original Background Radius: 40 -> 16
+        bg_radius = 16
+        
         # Background Bubble
         painter.setBrush(QBrush(QColor(30, 30, 30, 200)))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(int(center_x - 40), int(center_y - 40), 80, 80)
+        painter.drawEllipse(int(center_x - bg_radius), int(center_y - bg_radius), bg_radius * 2, bg_radius * 2)
 
         if self.state == "RECORDING":
             # Pulsing Red Circle
+            # Original Radius: 30 -> 12
+            base_radius = 12
             import math
             pulse_scale = 1.0 + 0.2 * math.sin(self.pulse_value)
-            r = radius * pulse_scale
+            r = base_radius * pulse_scale
             
             painter.setBrush(QBrush(QColor(255, 50, 50)))
             painter.drawEllipse(QRectF(center_x - r, center_y - r, 2*r, 2*r))
 
         elif self.state == "TRANSCRIBING":
             # Spinning Loader
-            painter.setPen(QPen(QColor(255, 255, 255), 4))
+            # Original Rect: 40x40 -> 16x16
+            # Pen width: 4 -> 2
+            painter.setPen(QPen(QColor(255, 255, 255), 2))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            rect = QRectF(center_x - 20, center_y - 20, 40, 40)
+            loader_radius = 8
+            rect = QRectF(center_x - loader_radius, center_y - loader_radius, loader_radius * 2, loader_radius * 2)
             painter.drawArc(rect, -self.spinner_angle * 16, 270 * 16)
 
         elif self.state == "SUCCESS":
-            # Green Checkmark
-            painter.setPen(QPen(QColor(50, 255, 50), 5))
-            path = QPainterPath()
-            path.moveTo(center_x - 15, center_y - 10)
-            path.lineTo(center_x - 5, center_y)
-            path.lineTo(center_x + 15, center_y - 25)
-            painter.drawPath(path)
-            
+            offset_y = 0
             if self.stats_text:
+                # Draw Text Top
                 painter.setPen(QPen(QColor(255, 255, 255)))
                 font = painter.font()
-                font.setPointSize(10)
+                font.setPointSize(7) # Smaller font
                 font.setBold(True)
                 painter.setFont(font)
                 
-                rect = QRectF(0, center_y + 10, self.width(), 40)
-                painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.stats_text)
+                # Position text above center
+                text_rect = QRectF(0, center_y - 25, self.width(), 20)
+                painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self.stats_text)
+                
+                offset_y = 5 # Push checkmark down slightly if text exists
+
+            # Green Checkmark
+            # Original: (-15, -10) -> (-5, 0) -> (15, -25) relative to center
+            # Scale 0.4: (-6, -4) -> (-2, 0) -> (6, -10)
+            # Pen width: 5 -> 2
+            
+            painter.setPen(QPen(QColor(50, 255, 50), 2))
+            path = QPainterPath()
+            
+            # Adjust center for checkmark position
+            check_center_y = center_y + offset_y
+            
+            path.moveTo(center_x - 6, check_center_y - 2) # Start
+            path.lineTo(center_x - 2, check_center_y + 2) # Bottom
+            path.lineTo(center_x + 6, check_center_y - 8) # End
+            painter.drawPath(path)

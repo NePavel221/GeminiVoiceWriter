@@ -161,6 +161,7 @@
 
   - [x] 9.1 Create FloatingWidget with Gemini theme
 
+
     - Implement frameless, always-on-top window
     - Apply Gemini color scheme (#0f0f23 background, #8b5cf6/#3b82f6 accents)
     - Implement drag-to-move functionality

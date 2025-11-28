@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QMessageBox, QComboBox,
                              QSystemTrayIcon, QMenu, QApplication, QScrollArea, QCheckBox)
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QRectF, QEvent, QStandardPaths
@@ -6,9 +6,12 @@ from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor
 import sys
 import threading
 import time
+import wave
+import numpy as np
 import pyautogui
 import pyperclip
 import keyboard
+import sounddevice as sd
 import json
 import os
 from ui.overlay import OverlayWindow
@@ -156,6 +159,49 @@ class MainWindow(QMainWindow):
         self.show_cost_checkbox = QCheckBox("Show Cost in Overlay")
         self.show_cost_checkbox.setChecked(True)
         settings_layout.addWidget(self.show_cost_checkbox)
+
+        # Sound Selection
+        sound_label = QLabel("🔊  Notification Sound")
+        sound_label.setObjectName("fieldLabel")
+        settings_layout.addWidget(sound_label)
+        
+        sound_row = QHBoxLayout()
+        self.sound_input = QComboBox()
+        self.sound_input.setEditable(False)
+        
+        # Sound options
+        self.sounds_data = {
+            "📷 Затвор камеры": "01_camera_shutter",
+            "⚙️ Механический клик": "02_mechanical_click",
+            "🔘 Переключатель": "03_switch_toggle",
+            "🔫 Передергивание затвора": "04_gun_cock",
+            "⌨️ Печатная машинка": "05_typewriter",
+            "👆 Щелчок пальцами": "06_snap",
+            "💥 Поп/хлопок": "07_pop",
+            "💡 Выключатель света": "08_light_switch",
+            "🖱️ Клик мыши": "09_mouse_click",
+            "🖊️ Клик ручки": "10_pen_click",
+            "🚪 Защелка двери": "11_door_latch",
+            "🔥 Зажигалка Zippo": "12_zippo",
+        }
+        
+        for display_name, sound_id in self.sounds_data.items():
+            self.sound_input.addItem(display_name, sound_id)
+        
+        sound_row.addWidget(self.sound_input, 1)
+        
+        # Play button
+        self.play_sound_btn = QPushButton("▶")
+        self.play_sound_btn.setFixedWidth(40)
+        self.play_sound_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.play_sound_btn.clicked.connect(self.play_selected_sound)
+        sound_row.addWidget(self.play_sound_btn)
+        
+        settings_layout.addLayout(sound_row)
+        
+        self.sound_enabled_checkbox = QCheckBox("Enable Sound Feedback")
+        self.sound_enabled_checkbox.setChecked(True)
+        settings_layout.addWidget(self.sound_enabled_checkbox)
         
         # Add stretch to settings layout
         settings_layout.addStretch()
@@ -433,6 +479,37 @@ class MainWindow(QMainWindow):
                 # Recursive call with default
                 self.update_hotkey_listener()
 
+    def get_sounds_dir(self):
+        """Get path to sounds directory."""
+        if hasattr(sys, "_MEIPASS"):
+            return os.path.join(sys._MEIPASS, "assets", "sounds", "clicks")
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "sounds", "clicks")
+    
+    def play_selected_sound(self):
+        """Play the currently selected sound."""
+        sound_id = self.sound_input.currentData()
+        self.play_sound(sound_id)
+    
+    def play_sound(self, sound_id):
+        """Play a sound by ID."""
+        if not self.sound_enabled_checkbox.isChecked():
+            return
+        
+        sounds_dir = self.get_sounds_dir()
+        filepath = os.path.join(sounds_dir, f"{sound_id}.wav")
+        
+        if os.path.exists(filepath):
+            try:
+                sd.stop()
+                with wave.open(filepath, 'rb') as wf:
+                    sample_rate = wf.getframerate()
+                    audio_data = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+                    audio_float = audio_data.astype(np.float32) / 32768.0
+                    # Play in separate thread to not block
+                    threading.Thread(target=lambda: sd.play(audio_float, sample_rate), daemon=True).start()
+            except Exception as e:
+                print(f"Error playing sound: {e}")
+
     def update_model_description(self):
         model_id = self.model_input.currentData()
         desc = ""
@@ -484,6 +561,9 @@ class MainWindow(QMainWindow):
         self.signals.status_update.emit(f"Recording... (Press {hotkey} to stop)")
         
         try:
+            # Play start sound
+            self.play_sound(self.sound_input.currentData())
+            
             self.recorder.start_recording()
             self.record_btn.setText("Stop Recording (Manual)")
             # Show Overlay
@@ -498,6 +578,9 @@ class MainWindow(QMainWindow):
         print("UI: stop_recording called")
         self.is_recording = False
         self.signals.status_update.emit("Processing...")
+        
+        # Play stop sound
+        self.play_sound(self.sound_input.currentData())
         
         try:
             audio_file, duration = self.recorder.stop_recording()
@@ -595,7 +678,9 @@ class MainWindow(QMainWindow):
             "hotkey": self.hotkey_input.text(),
             "model": self.model_input.currentData(),
             "show_overlay": self.show_overlay_checkbox.isChecked(),
-            "show_cost": self.show_cost_checkbox.isChecked()
+            "show_cost": self.show_cost_checkbox.isChecked(),
+            "sound": self.sound_input.currentData(),
+            "sound_enabled": self.sound_enabled_checkbox.isChecked()
         }
         
         try:
@@ -625,6 +710,13 @@ class MainWindow(QMainWindow):
                         
                     self.show_overlay_checkbox.setChecked(settings.get("show_overlay", True))
                     self.show_cost_checkbox.setChecked(settings.get("show_cost", True))
+                    
+                    # Load sound settings
+                    sound_id = settings.get("sound", "01_camera_shutter")
+                    sound_index = self.sound_input.findData(sound_id)
+                    if sound_index >= 0:
+                        self.sound_input.setCurrentIndex(sound_index)
+                    self.sound_enabled_checkbox.setChecked(settings.get("sound_enabled", True))
             
             # Update description initially
             self.update_model_description()

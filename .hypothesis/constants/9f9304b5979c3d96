@@ -1,4 +1,0 @@
-# file: C:\Users\nepav\Desktop\GeminiVoiceWriter_app\services\openrouter_provider.py
-# hypothesis_version: 6.148.3
-
-[0.0, 0.001, 60.0, 200, 500, '-', 'Authorization', 'Content-Type', 'Gemini Voice Writer', 'HTTP-Referer', 'Whisper 1', 'Whisper Large V3', 'X-Title', '_', 'application/json', 'audio_url', 'choices', 'content', 'description', 'error', 'id', 'message', 'messages', 'model', 'name', 'openai/whisper-1', 'openrouter', 'rb', 'role', 'text', 'type', 'url', 'user', 'utf-8']

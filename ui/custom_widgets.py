@@ -5,8 +5,9 @@ from PyQt6.QtGui import QKeyEvent
 class HotkeyInput(QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setPlaceholderText("Click to record hotkey...")
-        self.setReadOnly(True) # Prevent manual typing
+        self.setPlaceholderText("Нажмите для записи горячей клавиши...")
+        self.setReadOnly(True)  # Prevent manual typing
+        self.setMinimumHeight(44)  # Ensure proper height
         self.current_hotkey = ""
 
     def keyPressEvent(self, event: QKeyEvent):

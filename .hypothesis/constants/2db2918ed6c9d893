@@ -1,0 +1,4 @@
+# file: C:\Users\nepav\Desktop\GeminiVoiceWriter_app\services\base.py
+# hypothesis_version: 6.148.3
+
+[400, 401, 403, 404, 429, 500, 503, 'base', 'location', 'region', 'unknown']

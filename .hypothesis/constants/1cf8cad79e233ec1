@@ -1,0 +1,4 @@
+# file: C:\Users\nepav\Desktop\GeminiVoiceWriter_app\core\__init__.py
+# hypothesis_version: 6.148.3
+
+['AudioRecorder', 'HotkeyManager', 'SoundPlayer', 'TextInjector']

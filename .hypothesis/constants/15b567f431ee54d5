@@ -1,0 +1,4 @@
+# file: C:\Users\nepav\Desktop\GeminiVoiceWriter_app\core\hotkey_manager.py
+# hypothesis_version: 6.148.3
+
+[0.3, '+', 'Empty part in hotkey', 'alt', 'backspace', 'capslock', 'ctrl', 'delete', 'down', 'end', 'enter', 'esc', 'escape', 'f1', 'f10', 'f11', 'f12', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'hold', 'home', 'insert', 'left', 'numlock', 'pagedown', 'pageup', 'pause', 'printscreen', 'right', 'scrolllock', 'shift', 'space', 'tab', 'toggle', 'up', 'win', 'windows']

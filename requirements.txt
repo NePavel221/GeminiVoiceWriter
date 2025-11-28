@@ -1,6 +1,18 @@
+# Core dependencies
 google-generativeai
 pyaudio
 keyboard
 pyautogui
 pyperclip
 PyQt6
+
+# New dependencies for v2
+sounddevice          # Non-blocking audio recording
+scipy                # WAV file handling for sounddevice
+openai               # OpenAI Whisper API
+requests             # HTTP requests for OpenRouter
+pynput               # Keyboard simulation for text injection
+
+# Testing
+pytest
+hypothesis           # Property-based testing

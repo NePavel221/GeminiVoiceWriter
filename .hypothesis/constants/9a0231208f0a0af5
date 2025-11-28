@@ -1,0 +1,4 @@
+# file: C:\Users\nepav\Desktop\GeminiVoiceWriter_app\core\audio_recorder.py
+# hypothesis_version: 6.148.3
+
+[0.0, 16000, 'channels', 'default', 'id', 'input', 'int16', 'max_input_channels', 'name', 'wb']

@@ -1695,8 +1695,8 @@ class MainWindowV2(QMainWindow):
         self.record_btn.setStyleSheet("")
         self.status_label.setText("Завершение...")
         
-        # Small delay to capture last words
-        QTimer.singleShot(300, self._finish_recording)
+        # Short delay to capture last words without adding too much latency
+        QTimer.singleShot(100, self._finish_recording)
     
     def _finish_recording(self):
         """Stop recording and get transcription from chunked transcriber."""
@@ -1844,13 +1844,13 @@ class MainWindowV2(QMainWindow):
         
         # Вставляем в текстовое поле (если включено)
         if need_paste:
-            # Большая задержка (300ms) чтобы фокус вернулся в текстовое поле
-            QTimer.singleShot(300, self._do_paste)
-            # Обновляем UI после вставки (увеличено до 1000ms)
-            QTimer.singleShot(1000, self._do_update_ui)
+            # Keep paste nearly immediate to reduce perceived latency
+            QTimer.singleShot(75, self._do_paste)
+            # Update UI shortly after paste without waiting a full second
+            QTimer.singleShot(200, self._do_update_ui)
         else:
-            # Обновляем UI сразу
-            QTimer.singleShot(100, self._do_update_ui)
+            # Update UI almost immediately when no paste is needed
+            QTimer.singleShot(50, self._do_update_ui)
     
     def _do_paste(self):
         """Paste text to active text field using Windows API."""

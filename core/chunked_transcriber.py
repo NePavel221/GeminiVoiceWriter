@@ -19,7 +19,7 @@ class ChunkedTranscriber:
     Achieves 3-5 second transcription time regardless of recording length.
     """
     
-    CHUNK_DURATION = 15  # seconds
+    CHUNK_DURATION = 10  # seconds
     SAMPLE_RATE = 16000
     CHANNELS = 1
     SAMPLE_WIDTH = 2  # 16-bit

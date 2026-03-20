@@ -777,7 +777,7 @@ class MainWindowV2(QMainWindow):
             payload = {
                 "contents": [{
                     "parts": [
-                        {"text": "Transcribe this audio exactly as spoken. Return ONLY the text."},
+                        {"text": "Transcribe this audio exactly as spoken. Use Cyrillic for Russian words and Latin script for English technical terms, brand names, acronyms, and anglicisms. Do not transliterate English terms into Cyrillic. Normalize keyboard shortcuts in the form 'Ctrl + Shift + V', 'Alt + 1', 'Ctrl + C'. Add natural punctuation and capitalization. Return ONLY the final transcribed text."},
                         {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode('utf-8')}}
                     ]
                 }]
@@ -1523,14 +1523,35 @@ class MainWindowV2(QMainWindow):
         sound_id = self.sound_combo.currentData()
         sounds_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sounds", "clicks")
         filepath = os.path.join(sounds_dir, f"{sound_id}.wav")
-        if os.path.exists(filepath):
-            try:
-                sd.stop()
+        try:
+            sd.stop()
+            if os.path.exists(filepath):
                 with wave.open(filepath, 'rb') as wf:
                     data = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
-                    threading.Thread(target=lambda: sd.play(data, wf.getframerate()), daemon=True).start()
-            except Exception as e:
-                print(f"Sound error: {e}")
+                    sample_rate = wf.getframerate()
+                threading.Thread(target=lambda: sd.play(data, sample_rate), daemon=True).start()
+                return
+
+            # Fallback: synthesize a short camera-like click so sound feedback still works
+            sample_rate = 44100
+            duration = 0.06
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            env = np.exp(-45 * t)
+            click = 0.45 * env * (
+                np.sin(2 * np.pi * 1400 * t) +
+                0.5 * np.sin(2 * np.pi * 2200 * t) +
+                0.25 * np.sin(2 * np.pi * 3200 * t)
+            )
+            click = np.clip(click.astype(np.float32), -1.0, 1.0)
+            threading.Thread(target=lambda: sd.play(click, sample_rate), daemon=True).start()
+        except Exception as e:
+            print(f"Sound error: {e}")
+            try:
+                if sys.platform == 'win32':
+                    import winsound
+                    winsound.MessageBeep()
+            except Exception:
+                pass
     
     @pyqtSlot()
     def _toggle_recording(self):
@@ -1781,7 +1802,7 @@ class MainWindowV2(QMainWindow):
             payload = {
                 "contents": [{
                     "parts": [
-                        {"text": "Transcribe this audio exactly as spoken. Return ONLY the text."},
+                        {"text": "Transcribe this audio exactly as spoken. Use Cyrillic for Russian words and Latin script for English technical terms, brand names, acronyms, and anglicisms. Do not transliterate English terms into Cyrillic. Normalize keyboard shortcuts in the form 'Ctrl + Shift + V', 'Alt + 1', 'Ctrl + C'. Add natural punctuation and capitalization. Return ONLY the final transcribed text."},
                         {"inline_data": {"mime_type": mime_type, "data": audio_base64}}
                     ]
                 }]
@@ -1869,6 +1890,7 @@ class MainWindowV2(QMainWindow):
             
             # Windows API constants
             VK_CONTROL = 0x11
+            VK_SHIFT = 0x10
             VK_V = 0x56
             KEYEVENTF_KEYUP = 0x0002
             
@@ -1877,27 +1899,31 @@ class MainWindowV2(QMainWindow):
             # Отпускаем все модификаторы через Windows API
             user32.keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0)  # Alt up
             user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
-            user32.keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0)  # Shift up
+            user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)  # Shift up
             
-            time.sleep(0.3)
+            time.sleep(0.12)
             
-            # Отправляем Ctrl+V через Windows API
+            # Отправляем Ctrl+Shift+V через Windows API
             user32.keybd_event(VK_CONTROL, 0, 0, 0)  # Ctrl down
-            time.sleep(0.05)
+            time.sleep(0.02)
+            user32.keybd_event(VK_SHIFT, 0, 0, 0)  # Shift down
+            time.sleep(0.02)
             user32.keybd_event(VK_V, 0, 0, 0)  # V down
-            time.sleep(0.05)
+            time.sleep(0.03)
             user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)  # V up
-            time.sleep(0.05)
+            time.sleep(0.02)
+            user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)  # Shift up
+            time.sleep(0.02)
             user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
             
-            log.info("[PASTE] Sent ctrl+v via Windows API")
+            log.info("[PASTE] Sent ctrl+shift+v via Windows API")
             
         except Exception as e:
             log.warning(f"[PASTE] Windows API failed: {e}, trying pyautogui")
             try:
                 pyautogui.FAILSAFE = False
-                pyautogui.hotkey('ctrl', 'v', interval=0.1)
-                log.info("[PASTE] Sent ctrl+v via pyautogui (fallback)")
+                pyautogui.hotkey('ctrl', 'shift', 'v', interval=0.05)
+                log.info("[PASTE] Sent ctrl+shift+v via pyautogui (fallback)")
             except Exception as e2:
                 log.error(f"[PASTE] All methods failed: {e2}")
         

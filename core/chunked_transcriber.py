@@ -126,9 +126,24 @@ class ChunkedTranscriber:
             
             # Build prompt based on language
             if self.language == "auto":
-                prompt = "Transcribe this audio exactly as spoken. Return ONLY the transcribed text, nothing else."
+                prompt = (
+                    "Transcribe this audio exactly as spoken. "
+                    "Use Cyrillic for Russian words and Latin script for English technical terms, brand names, acronyms, and anglicisms. "
+                    "Do not transliterate English terms into Cyrillic. "
+                    "Normalize keyboard shortcuts in the form 'Ctrl + Shift + V', 'Alt + 1', 'Ctrl + C'. "
+                    "Add natural punctuation and capitalization. "
+                    "Return ONLY the final transcribed text."
+                )
             else:
-                prompt = f"Transcribe this audio in {self.language}. Keep technical terms, brand names, and foreign words as they are spoken (e.g., Gemini, API, Python, iPhone). Return ONLY the transcribed text, nothing else."
+                prompt = (
+                    f"Transcribe this audio in {self.language}. "
+                    "Use Cyrillic for Russian words and Latin script for English technical terms, brand names, acronyms, and anglicisms "
+                    "(for example: Gemini, Python, API, iPhone, Telegram, OpenAI). "
+                    "Do not transliterate English terms into Cyrillic. "
+                    "Normalize keyboard shortcuts in the form 'Ctrl + Shift + V', 'Alt + 1', 'Ctrl + C'. "
+                    "Add natural punctuation and capitalization. "
+                    "Return ONLY the final transcribed text."
+                )
             
             # REST API request
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"

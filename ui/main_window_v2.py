@@ -400,6 +400,9 @@ class MainWindowV2(QMainWindow):
         self.model_combo.setObjectName("input")
         models = [
             ("Gemini 2.5 Flash (Рекомендуется)", "gemini-2.5-flash"),
+            ("Gemini 3 Flash Preview", "gemini-3-flash-preview"),
+            ("Gemini 3.1 Flash-Lite Preview", "gemini-3.1-flash-lite-preview"),
+            ("Gemini 3.1 Pro Preview", "gemini-3.1-pro-preview"),
             ("Gemini 2.0 Flash (Быстрый)", "gemini-2.0-flash"),
             ("Gemini 2.0 Flash-Lite (Экономный)", "gemini-2.0-flash-lite"),
             ("Gemini 2.5 Pro (Профессиональный)", "gemini-2.5-pro"),

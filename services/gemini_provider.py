@@ -19,6 +19,9 @@ class GeminiProvider(TranscriptionProvider):
         "gemini-2.0-flash-lite": 0.0005,
         "gemini-2.5-flash-lite": 0.0005,
         "gemini-2.5-pro": 0.0020,
+        "gemini-3-flash-preview": 0.0018,
+        "gemini-3.1-flash-lite-preview": 0.0008,
+        "gemini-3.1-pro-preview": 0.0035,
         "gemini-3-pro-preview": 0.0030,
         "gemini-1.5-flash": 0.0015,
         "gemini-1.5-pro": 0.0020,
@@ -123,6 +126,21 @@ Return ONLY the transcribed text, no additional commentary or formatting."""
                 "id": "gemini-2.5-flash",
                 "name": "Gemini 2.5 Flash",
                 "description": "Balanced speed and quality for most tasks"
+            },
+            {
+                "id": "gemini-3-flash-preview",
+                "name": "Gemini 3 Flash Preview",
+                "description": "Newer fast multimodal preview model"
+            },
+            {
+                "id": "gemini-3.1-flash-lite-preview",
+                "name": "Gemini 3.1 Flash-Lite Preview",
+                "description": "Newest lightweight fast preview model"
+            },
+            {
+                "id": "gemini-3.1-pro-preview",
+                "name": "Gemini 3.1 Pro Preview",
+                "description": "Highest-quality preview model in the current API list"
             },
             {
                 "id": "gemini-2.0-flash",

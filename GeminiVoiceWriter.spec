@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['main_v2.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=[('icon.ico', '.'), ('ui/checkmark.svg', 'ui'), ('assets/sounds', 'assets/sounds')],

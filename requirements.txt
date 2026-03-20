@@ -11,6 +11,7 @@ PyQt6
 # New dependencies for v2
 sounddevice          # Non-blocking audio recording
 scipy                # WAV file handling for sounddevice
+soundfile            # FLAC/WAV save support used by core/recorder.py
 openai               # OpenAI Whisper API
 requests             # HTTP requests for OpenRouter
 pynput               # Keyboard simulation for text injection

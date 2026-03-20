@@ -15,6 +15,8 @@ class GeminiProvider(TranscriptionProvider):
     # Cost per minute for different models (approximate)
     COST_PER_MINUTE = {
         "gemini-2.5-flash": 0.0015,
+        "gemini-2.0-flash": 0.0012,
+        "gemini-2.0-flash-lite": 0.0005,
         "gemini-2.5-flash-lite": 0.0005,
         "gemini-2.5-pro": 0.0020,
         "gemini-3-pro-preview": 0.0030,
@@ -123,19 +125,19 @@ Return ONLY the transcribed text, no additional commentary or formatting."""
                 "description": "Balanced speed and quality for most tasks"
             },
             {
-                "id": "gemini-2.5-flash-lite",
-                "name": "Gemini 2.5 Flash-Lite",
-                "description": "Fastest and cheapest for short commands"
+                "id": "gemini-2.0-flash",
+                "name": "Gemini 2.0 Flash",
+                "description": "Fast multimodal model with broad availability"
+            },
+            {
+                "id": "gemini-2.0-flash-lite",
+                "name": "Gemini 2.0 Flash-Lite",
+                "description": "Cheapest lightweight option for short commands"
             },
             {
                 "id": "gemini-2.5-pro",
                 "name": "Gemini 2.5 Pro",
                 "description": "Best quality for complex transcriptions"
-            },
-            {
-                "id": "gemini-3-pro-preview",
-                "name": "Gemini 3.0 Pro Preview",
-                "description": "Latest model with advanced capabilities"
             },
         ]
     

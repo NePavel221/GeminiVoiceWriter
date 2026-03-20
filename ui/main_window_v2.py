@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QScrollArea, QApplication,
     QSystemTrayIcon, QMenu, QMessageBox, QSpinBox, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QStandardPaths, QDateTime, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QObject, QStandardPaths, QDateTime, QTimer, QMetaObject, Q_ARG
 from PyQt6.QtGui import QIcon, QAction, QPixmap, QPainter, QColor, QFont
 import shutil
 
@@ -27,9 +27,57 @@ import google.generativeai as genai
 from ui.recording_widget import RecordingWidget
 from utils.logger import get_logger
 from utils.history_manager import HistoryManager, TranscriptionRecord
+from core.chunked_transcriber import ChunkedTranscriber
 
 # Initialize logger
 log = get_logger()
+
+# Cyrillic to Latin keyboard mapping (physical key positions on Russian keyboard)
+# Uses keyboard library key names
+CYRILLIC_TO_LATIN = {
+    'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p',
+    'х': '[', 'ъ': ']', 'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k',
+    'д': 'l', 'ж': ';', 'э': "'", 'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm',
+    'б': ',', 'ю': '.', 'ё': '`',
+    # Uppercase
+    'Й': 'q', 'Ц': 'w', 'У': 'e', 'К': 'r', 'Е': 't', 'Н': 'y', 'Г': 'u', 'Ш': 'i', 'Щ': 'o', 'З': 'p',
+    'Х': '[', 'Ъ': ']', 'Ф': 'a', 'Ы': 's', 'В': 'd', 'А': 'f', 'П': 'g', 'Р': 'h', 'О': 'j', 'Л': 'k',
+    'Д': 'l', 'Ж': ';', 'Э': "'", 'Я': 'z', 'Ч': 'x', 'С': 'c', 'М': 'v', 'И': 'b', 'Т': 'n', 'Ь': 'm',
+    'Б': ',', 'Ю': '.', 'Ё': '`',
+}
+
+# Scan code for grave/backtick key (`) - keyboard library doesn't support it by name
+GRAVE_SCANCODE = 41
+
+def convert_hotkey_cyrillic(hotkey: str) -> str:
+    """Convert cyrillic characters in hotkey to their Latin equivalents."""
+    parts = hotkey.lower().split('+')
+    converted = []
+    
+    for part in parts:
+        part = part.strip()
+        if part in CYRILLIC_TO_LATIN:
+            converted.append(CYRILLIC_TO_LATIN[part])
+        else:
+            converted.append(part)
+    
+    return '+'.join(converted)
+
+def is_grave_hotkey(hotkey: str) -> bool:
+    """Check if hotkey contains grave/backtick key."""
+    lower = hotkey.lower()
+    return '`' in lower or 'ё' in lower
+
+
+def get_resource_path(relative_path: str) -> str:
+    """Get absolute path to resource, works for dev and PyInstaller."""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe
+        base_path = sys._MEIPASS
+    else:
+        # Running as script
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
 
 
 class WorkerSignals(QObject):
@@ -37,6 +85,7 @@ class WorkerSignals(QObject):
     finished = pyqtSignal(str, float, float)
     retranscribe_finished = pyqtSignal(str, int)  # text, history_index
     error = pyqtSignal(str)
+    audio_level = pyqtSignal(float)  # For waveform animation
 
 
 class SidebarButton(QPushButton):
@@ -119,6 +168,7 @@ class MainWindowV2(QMainWindow):
         self.signals.finished.connect(self._on_transcription_finished)
         self.signals.retranscribe_finished.connect(self._on_retranscribe_finished)
         self.signals.error.connect(self._on_error)
+        self.signals.audio_level.connect(self._on_audio_level)
         self.hotkey_triggered.connect(self._toggle_recording)
         
         self._setup_ui()
@@ -172,9 +222,27 @@ class MainWindowV2(QMainWindow):
         
         sidebar_layout.addStretch()
         
-        version = QLabel("v2.0.0")
+        version = QLabel("Gemini Voice Writer v2.0")
         version.setObjectName("version")
         sidebar_layout.addWidget(version)
+        
+        # Author info
+        author_link = QLabel('<span style="color: #9ca3af;">Автор: </span><a href="https://t.me/Pavel_TeaGPT" style="color: #8b5cf6;">t.me/Pavel_TeaGPT</a>')
+        author_link.setObjectName("authorLink")
+        author_link.setOpenExternalLinks(True)
+        author_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        sidebar_layout.addWidget(author_link)
+        
+        # Empty line as spacer
+        spacer_label = QLabel("")
+        spacer_label.setObjectName("authorLabel")
+        sidebar_layout.addWidget(spacer_label)
+        
+        # P.S. line
+        author_ps = QLabel("P.S: По сотрудничеству пишите в ЛС\n(Открыт к новым проектам)")
+        author_ps.setObjectName("authorLabel")
+        author_ps.setWordWrap(True)
+        sidebar_layout.addWidget(author_ps)
         
         main_layout.addWidget(sidebar)
         
@@ -274,6 +342,21 @@ class MainWindowV2(QMainWindow):
         self.api_key_input.setObjectName("input")
         card_layout.addWidget(self.api_key_input)
         
+        # Proxy settings
+        card_layout.addSpacing(10)
+        proxy_label = QLabel("Proxy (опционально)")
+        proxy_label.setObjectName("fieldLabel")
+        card_layout.addWidget(proxy_label)
+        
+        self.proxy_input = QLineEdit()
+        self.proxy_input.setPlaceholderText("http://login:password@ip:port")
+        self.proxy_input.setObjectName("input")
+        card_layout.addWidget(self.proxy_input)
+        
+        proxy_hint = QLabel("Оставьте пустым для прямого подключения")
+        proxy_hint.setStyleSheet("color: #6b7280; font-size: 11px;")
+        card_layout.addWidget(proxy_hint)
+        
         layout.addWidget(card)
         
         self.save_btn = QPushButton("Сохранить настройки")
@@ -281,9 +364,9 @@ class MainWindowV2(QMainWindow):
         self.save_btn.clicked.connect(self._save_settings)
         layout.addWidget(self.save_btn)
         
-        self.status_label = QLabel("Готово")
-        self.status_label.setObjectName("status")
-        layout.addWidget(self.status_label)
+        # Hidden status label (used for internal status updates)
+        self.status_label = QLabel("")
+        self.status_label.hide()
         
         # Hidden checkboxes for settings compatibility
         self.show_overlay_cb = QCheckBox()
@@ -326,6 +409,45 @@ class MainWindowV2(QMainWindow):
         
         layout.addWidget(card)
         
+        # Language selection
+        card_lang, card_lang_layout = self._create_card("Язык транскрибации")
+        
+        self.language_combo = QComboBox()
+        self.language_combo.setObjectName("input")
+        languages = [
+            ("Русский", "Russian"),
+            ("Английский", "English"),
+            ("Немецкий", "German"),
+            ("Французский", "French"),
+            ("Испанский", "Spanish"),
+            ("Итальянский", "Italian"),
+            ("Китайский", "Chinese"),
+            ("Японский", "Japanese"),
+            ("Авто (определить)", "auto"),
+        ]
+        for name, value in languages:
+            self.language_combo.addItem(name, value)
+        card_lang_layout.addWidget(self.language_combo)
+        
+        lang_hint = QLabel("Технические термины и названия сохраняются на оригинальном языке")
+        lang_hint.setStyleSheet("color: #6b7280; font-size: 11px;")
+        card_lang_layout.addWidget(lang_hint)
+        
+        layout.addWidget(card_lang)
+        
+        # Real-time display settings
+        card2, card_layout2 = self._create_card("Отображение")
+        
+        self.show_realtime_text_cb = QCheckBox("Показывать текст в реальном времени")
+        self.show_realtime_text_cb.setChecked(False)
+        self.show_realtime_text_cb.setObjectName("checkbox")
+        self.show_realtime_text_cb.setToolTip(
+            "Когда включено, текст будет появляться в виджете по мере произнесения"
+        )
+        card_layout2.addWidget(self.show_realtime_text_cb)
+        
+        layout.addWidget(card2)
+        
         self.record_btn = QPushButton("Начать запись")
         self.record_btn.setObjectName("recordButton")
         self.record_btn.clicked.connect(self._toggle_recording)
@@ -356,7 +478,7 @@ class MainWindowV2(QMainWindow):
         
         self.hotkey_input = HotkeyInput()
         self.hotkey_input.setObjectName("input")
-        self.hotkey_input.setText("alt+1")
+        self.hotkey_input.setText("alt+ё")
         self.hotkey_input.setMinimumHeight(44)
         self.hotkey_input.textChanged.connect(self._on_hotkey_changed)
         card_layout.addWidget(self.hotkey_input)
@@ -370,7 +492,7 @@ class MainWindowV2(QMainWindow):
         
         self.cancel_hotkey_input = HotkeyInput()
         self.cancel_hotkey_input.setObjectName("input")
-        self.cancel_hotkey_input.setText("alt+ctrl+1")
+        self.cancel_hotkey_input.setText("alt+1")
         self.cancel_hotkey_input.setMinimumHeight(44)
         self.cancel_hotkey_input.textChanged.connect(self._on_cancel_hotkey_changed)
         card_layout.addWidget(self.cancel_hotkey_input)
@@ -628,9 +750,10 @@ class MainWindowV2(QMainWindow):
         ).start()
     
     def _do_retranscribe(self, audio_file: str, duration: float, history_index: int):
-        """Background re-transcription."""
+        """Background re-transcription using REST API."""
         try:
             import base64
+            import requests
             
             api_key = self.api_key_input.text().strip()
             model = self.model_combo.currentData() or "gemini-2.5-flash"
@@ -638,34 +761,49 @@ class MainWindowV2(QMainWindow):
             log.info(f"[RETRANSCRIBE] Starting: {audio_file}")
             log.info(f"[RETRANSCRIBE] Model: {model}")
             
-            genai.configure(api_key=api_key)
-            genai_model = genai.GenerativeModel(model)
-            
             with open(audio_file, 'rb') as f:
                 audio_bytes = f.read()
             
             log.debug(f"[RETRANSCRIBE] File size: {len(audio_bytes)/1024:.1f} KB")
             
             mime_type = "audio/flac" if audio_file.endswith('.flac') else "audio/wav"
-            audio_part = {
-                "inline_data": {
-                    "mime_type": mime_type,
-                    "data": base64.b64encode(audio_bytes).decode('utf-8')
-                }
+            
+            # REST API request (bypasses SDK regional restrictions)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": "Transcribe this audio exactly as spoken. Return ONLY the text."},
+                        {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(audio_bytes).decode('utf-8')}}
+                    ]
+                }]
             }
             
-            log.debug("[RETRANSCRIBE] Sending to API...")
+            log.debug("[RETRANSCRIBE] Sending to REST API...")
             t0 = time.time()
             
-            response = genai_model.generate_content(
-                ["Transcribe this audio exactly as spoken. Return ONLY the text.", audio_part],
-                request_options={"timeout": 60}
-            )
+            # Proxy support
+            proxies = None
+            proxy_url = self.proxy_input.text().strip()
+            if proxy_url:
+                proxies = {"http": proxy_url, "https": proxy_url}
+            
+            response = requests.post(url, json=payload, timeout=60, proxies=proxies)
             
             t1 = time.time()
-            print(f"[RETRANSCRIBE] API response in {t1-t0:.2f}s")
+            print(f"[RETRANSCRIBE] API response in {t1-t0:.2f}s, status={response.status_code}")
             
-            text = response.text.strip() if response.text else ""
+            if response.status_code != 200:
+                error_msg = response.text[:200] if response.text else f"HTTP {response.status_code}"
+                raise Exception(f"API error {response.status_code}: {error_msg}")
+            
+            result = response.json()
+            text = ""
+            if "candidates" in result and result["candidates"]:
+                candidate = result["candidates"][0]
+                if "content" in candidate and "parts" in candidate["content"]:
+                    text = candidate["content"]["parts"][0].get("text", "").strip()
+            
             print(f"[RETRANSCRIBE] Result: '{text[:100]}...'")
             
             # Emit signal to update UI in main thread (history update happens there)
@@ -744,10 +882,8 @@ class MainWindowV2(QMainWindow):
     
     def _get_recordings_dir(self) -> str:
         """Get directory for storing audio recordings."""
-        app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
-        recordings_dir = os.path.join(app_data, "recordings")
-        os.makedirs(recordings_dir, exist_ok=True)
-        return recordings_dir
+        from utils.paths import get_recordings_dir
+        return get_recordings_dir()
     
     def _add_to_history(self, text: str, duration: float, audio_file: str = None):
         if not self.history_enabled:
@@ -910,6 +1046,9 @@ class MainWindowV2(QMainWindow):
             btn.setChecked(name == page_name)
 
     def _apply_styles(self):
+        # Get path to checkmark SVG
+        checkmark_path = get_resource_path("ui/checkmark.svg").replace("\\", "/")
+        
         self.setStyleSheet(f"""
             QMainWindow {{ background-color: {self.COLORS['bg_dark']}; }}
             
@@ -917,7 +1056,9 @@ class MainWindowV2(QMainWindow):
             #content {{ background-color: {self.COLORS['bg_content']}; }}
             
             #logo {{ color: {self.COLORS['accent']}; font-size: 16px; font-weight: bold; padding: 10px 0; }}
-            #version {{ color: {self.COLORS['text_muted']}; font-size: 11px; }}
+            #version {{ color: {self.COLORS['text_muted']}; font-size: 11px; margin: 0; padding: 0; }}
+            #authorLink {{ color: {self.COLORS['text_muted']}; font-size: 11px; margin: 0; padding: 0; }}
+            #authorLabel {{ color: {self.COLORS['text_muted']}; font-size: 11px; margin: 0; padding: 0; }}
             
             SidebarButton {{
                 background-color: transparent;
@@ -957,7 +1098,7 @@ class MainWindowV2(QMainWindow):
             
             #checkbox {{ color: {self.COLORS['text']}; font-size: 14px; spacing: 10px; }}
             #checkbox::indicator {{ width: 20px; height: 20px; border-radius: 4px; border: 2px solid {self.COLORS['border']}; background-color: transparent; }}
-            #checkbox::indicator:checked {{ background-color: {self.COLORS['accent']}; border-color: {self.COLORS['accent']}; image: url(ui/checkmark.svg); }}
+            #checkbox::indicator:checked {{ background-color: {self.COLORS['accent']}; border-color: {self.COLORS['accent']}; image: url({checkmark_path}); }}
             
             #primaryButton {{
                 background-color: {self.COLORS['accent']};
@@ -1064,6 +1205,7 @@ class MainWindowV2(QMainWindow):
     def _init_hotkey(self):
         self._registered_hotkeys = []
         self._setup_hotkeys()
+        # Watchdog отключён — если клавиши перестанут работать, перезапустите приложение
     
     def _setup_hotkeys(self):
         """Setup all hotkeys."""
@@ -1075,21 +1217,82 @@ class MainWindowV2(QMainWindow):
                 pass
         self._registered_hotkeys = []
         
-        # Main hotkey (start/stop recording)
-        hotkey = self.hotkey_input.text().strip() or "alt+1"
+        # Unhook all keyboard hooks and re-register (более надёжный способ)
         try:
-            hk = keyboard.add_hotkey(hotkey, self.hotkey_triggered.emit)
-            self._registered_hotkeys.append(hk)
-        except Exception as e:
-            print(f"Failed to set hotkey {hotkey}: {e}")
+            keyboard.unhook_all_hotkeys()
+        except:
+            pass
+        
+        # Main hotkey (start/stop recording)
+        hotkey_raw = self.hotkey_input.text().strip() or "alt+1"
+        
+        if is_grave_hotkey(hotkey_raw):
+            # Special handling for grave/backtick key using low-level hook
+            self._setup_grave_hotkey('main')
+            log.info(f"Main hotkey registered (grave hook): {hotkey_raw}")
+        else:
+            hotkey = convert_hotkey_cyrillic(hotkey_raw)
+            try:
+                hk = keyboard.add_hotkey(hotkey, self.hotkey_triggered.emit, suppress=False, trigger_on_release=False)
+                self._registered_hotkeys.append(hk)
+                log.info(f"Main hotkey registered: {hotkey_raw} -> {hotkey}")
+            except Exception as e:
+                log.error(f"Failed to set hotkey {hotkey_raw}: {e}")
         
         # Cancel hotkey (discard recording)
-        cancel_hotkey = self.cancel_hotkey_input.text().strip() or "alt+ctrl+1"
-        try:
-            hk = keyboard.add_hotkey(cancel_hotkey, self._cancel_recording)
-            self._registered_hotkeys.append(hk)
-        except Exception as e:
-            print(f"Failed to set cancel hotkey {cancel_hotkey}: {e}")
+        cancel_hotkey_raw = self.cancel_hotkey_input.text().strip() or "alt+1"
+        
+        if is_grave_hotkey(cancel_hotkey_raw):
+            self._setup_grave_hotkey('cancel')
+            log.info(f"Cancel hotkey registered (grave hook): {cancel_hotkey_raw}")
+        else:
+            cancel_hotkey = convert_hotkey_cyrillic(cancel_hotkey_raw)
+            try:
+                hk = keyboard.add_hotkey(cancel_hotkey, self._cancel_recording, suppress=False, trigger_on_release=False)
+                self._registered_hotkeys.append(hk)
+                log.info(f"Cancel hotkey registered: {cancel_hotkey_raw} -> {cancel_hotkey}")
+            except Exception as e:
+                log.error(f"Failed to set cancel hotkey {cancel_hotkey_raw}: {e}")
+    
+    def _setup_grave_hotkey(self, hotkey_type: str):
+        """Setup hotkey for grave/backtick key using low-level hook."""
+        # Remove existing grave hook if any
+        if hasattr(self, '_grave_hook') and self._grave_hook:
+            try:
+                keyboard.unhook(self._grave_hook)
+            except:
+                pass
+            self._grave_hook = None
+        
+        def on_key_event(event):
+            # Filter: only grave key (scan code 41) on key down
+            if event.scan_code != GRAVE_SCANCODE:
+                return
+            if event.event_type != 'down':
+                return
+            
+            # Only trigger if Alt is held
+            if not keyboard.is_pressed('alt'):
+                return
+            
+            # Debounce - 1 second between triggers
+            current_time = time.time()
+            last_grave = getattr(self, '_last_grave_time', 0)
+            if current_time - last_grave < 1.0:
+                return
+            self._last_grave_time = current_time
+            
+            log.info(f"[GRAVE] Alt+` triggered, type={hotkey_type}")
+            
+            if hotkey_type == 'main':
+                # Thread-safe call to main thread
+                QMetaObject.invokeMethod(self, "_toggle_recording", Qt.ConnectionType.QueuedConnection)
+            elif hotkey_type == 'cancel':
+                QMetaObject.invokeMethod(self, "_cancel_recording", Qt.ConnectionType.QueuedConnection)
+        
+        # Use keyboard.hook to catch all events
+        self._grave_hook = keyboard.hook(on_key_event)
+        self._grave_hotkey_type = hotkey_type
     
     def _on_hotkey_changed(self):
         new_hotkey = self.hotkey_input.text().strip()
@@ -1112,20 +1315,22 @@ class MainWindowV2(QMainWindow):
         self.status_label.setText(f"Клавиша отмены: {new_hotkey}")
     
     def _get_settings_path(self):
-        app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
-        os.makedirs(app_data, exist_ok=True)
-        return os.path.join(app_data, "settings_v2.json")
+        from utils.paths import get_settings_path
+        return get_settings_path()
     
     def _save_settings(self):
         # Note: history is now stored in SQLite database, not in JSON
         settings = {
             "api_key": self.api_key_input.text(),
+            "proxy": self.proxy_input.text(),
             "hotkey": self.hotkey_input.text(),
             "cancel_hotkey": self.cancel_hotkey_input.text(),
             "auto_paste": self.auto_paste_cb.isChecked(),
             "auto_copy": self.auto_copy_cb.isChecked(),
             "model": self.model_combo.currentData(),
             "model_index": self.model_combo.currentIndex(),
+            "language": self.language_combo.currentData(),
+            "language_index": self.language_combo.currentIndex(),
             "method": self.method_combo.currentData() if hasattr(self, 'method_combo') else "live",
             "show_overlay": self.show_overlay_cb.isChecked(),
             "show_cost": self.show_cost_cb.isChecked(),
@@ -1133,6 +1338,7 @@ class MainWindowV2(QMainWindow):
             "sound_index": self.sound_combo.currentIndex(),
             "sound_enabled": self.sound_enabled_cb.isChecked(),
             "show_widget_on_record": self.show_widget_on_record_cb.isChecked(),
+            "show_realtime_text": self.show_realtime_text_cb.isChecked(),
             "stats": self.stats,
             "history_enabled": self.history_enabled,
         }
@@ -1144,8 +1350,25 @@ class MainWindowV2(QMainWindow):
         log.info(f"Settings saved. Model: {self.model_combo.currentData()}")
     
     def _save_and_close_settings(self):
-        """Save settings (don't close window - user can close manually)."""
+        """Save settings with visual feedback."""
+        # Visual feedback - change button text and color
+        original_text = self.save_settings_btn.text()
+        self.save_settings_btn.setText("✓ Сохранено!")
+        self.save_settings_btn.setStyleSheet(f"background-color: {self.COLORS['success']}; color: white;")
+        self.save_settings_btn.setEnabled(False)
+        
+        # Save settings
         self._save_settings()
+        self._settings_changed = False
+        
+        # Reset button after 1.5 seconds
+        def reset_button():
+            self.save_settings_btn.setText(original_text)
+            self.save_settings_btn.setStyleSheet("")  # Reset to default
+            self.save_settings_btn.setEnabled(True)
+            self.buttons_row.hide()
+        
+        QTimer.singleShot(1500, reset_button)
     
     def _cancel_settings_changes(self):
         """Cancel changes and reload original settings."""
@@ -1173,6 +1396,8 @@ class MainWindowV2(QMainWindow):
     def _load_settings(self):
         try:
             path = self._get_settings_path()
+            s = {}  # Default empty settings
+            
             if os.path.exists(path):
                 # Try UTF-8 first, then fallback to system encoding
                 try:
@@ -1181,44 +1406,59 @@ class MainWindowV2(QMainWindow):
                 except UnicodeDecodeError:
                     with open(path, encoding='cp1251') as f:
                         s = json.load(f)
-                self.api_key_input.setText(s.get("api_key", ""))
-                self.hotkey_input.setText(s.get("hotkey", "alt+1"))
-                self.cancel_hotkey_input.setText(s.get("cancel_hotkey", "alt+ctrl+1"))
-                self.auto_paste_cb.setChecked(s.get("auto_paste", True))
-                self.auto_copy_cb.setChecked(s.get("auto_copy", True))
+            else:
+                log.info("First run - using default settings (no API key)")
+            
+            # Apply settings (defaults used if not in file)
+            self.api_key_input.setText(s.get("api_key", ""))
+            self.proxy_input.setText(s.get("proxy", ""))
+            self.hotkey_input.setText(s.get("hotkey", "alt+`"))
+            self.cancel_hotkey_input.setText(s.get("cancel_hotkey", "alt+1"))
+            self.auto_paste_cb.setChecked(s.get("auto_paste", True))
+            self.auto_copy_cb.setChecked(s.get("auto_copy", True))
                 
-                # Load model - try index first, then data
-                model_idx = s.get("model_index", -1)
-                if model_idx >= 0 and model_idx < self.model_combo.count():
-                    self.model_combo.setCurrentIndex(model_idx)
-                else:
-                    idx = self.model_combo.findData(s.get("model"))
-                    if idx >= 0: 
-                        self.model_combo.setCurrentIndex(idx)
-                print(f"[SETTINGS] Loaded model: {self.model_combo.currentData()} (index {self.model_combo.currentIndex()})")
+            # Load model - try index first, then data
+            model_idx = s.get("model_index", -1)
+            if model_idx >= 0 and model_idx < self.model_combo.count():
+                self.model_combo.setCurrentIndex(model_idx)
+            else:
+                idx = self.model_combo.findData(s.get("model"))
+                if idx >= 0: 
+                    self.model_combo.setCurrentIndex(idx)
+            print(f"[SETTINGS] Loaded model: {self.model_combo.currentData()} (index {self.model_combo.currentIndex()})")
+            
+            # Load language - try index first, then data
+            lang_idx = s.get("language_index", -1)
+            if lang_idx >= 0 and lang_idx < self.language_combo.count():
+                self.language_combo.setCurrentIndex(lang_idx)
+            else:
+                idx = self.language_combo.findData(s.get("language", "Russian"))
+                if idx >= 0:
+                    self.language_combo.setCurrentIndex(idx)
+            
+            if hasattr(self, 'method_combo'):
+                idx = self.method_combo.findData(s.get("method", "live"))
+                if idx >= 0: self.method_combo.setCurrentIndex(idx)
+            self.show_overlay_cb.setChecked(s.get("show_overlay", True))
+            self.show_cost_cb.setChecked(s.get("show_cost", True))
+            
+            # Load sound - try index first, then data
+            sound_idx = s.get("sound_index", -1)
+            if sound_idx >= 0 and sound_idx < self.sound_combo.count():
+                self.sound_combo.setCurrentIndex(sound_idx)
+            else:
+                idx = self.sound_combo.findData(s.get("sound"))
+                if idx >= 0: self.sound_combo.setCurrentIndex(idx)
                 
-                if hasattr(self, 'method_combo'):
-                    idx = self.method_combo.findData(s.get("method", "live"))
-                    if idx >= 0: self.method_combo.setCurrentIndex(idx)
-                self.show_overlay_cb.setChecked(s.get("show_overlay", True))
-                self.show_cost_cb.setChecked(s.get("show_cost", True))
-                
-                # Load sound - try index first, then data
-                sound_idx = s.get("sound_index", -1)
-                if sound_idx >= 0 and sound_idx < self.sound_combo.count():
-                    self.sound_combo.setCurrentIndex(sound_idx)
-                else:
-                    idx = self.sound_combo.findData(s.get("sound"))
-                    if idx >= 0: self.sound_combo.setCurrentIndex(idx)
-                    
-                self.sound_enabled_cb.setChecked(s.get("sound_enabled", True))
-                self.show_widget_on_record_cb.setChecked(s.get("show_widget_on_record", False))
-                self.stats = s.get("stats", self.stats)
-                self._update_stats_display()
-                
-                # Load history_enabled setting
-                self.history_enabled = s.get("history_enabled", True)
-                self.history_enabled_cb.setChecked(self.history_enabled)
+            self.sound_enabled_cb.setChecked(s.get("sound_enabled", True))
+            self.show_widget_on_record_cb.setChecked(s.get("show_widget_on_record", False))
+            self.show_realtime_text_cb.setChecked(s.get("show_realtime_text", False))
+            self.stats = s.get("stats", self.stats)
+            self._update_stats_display()
+            
+            # Load history_enabled setting
+            self.history_enabled = s.get("history_enabled", True)
+            self.history_enabled_cb.setChecked(self.history_enabled)
                 
         except Exception as e:
             log.error(f"Load settings error: {e}")
@@ -1288,6 +1528,7 @@ class MainWindowV2(QMainWindow):
             except Exception as e:
                 print(f"Sound error: {e}")
     
+    @pyqtSlot()
     def _toggle_recording(self):
         # Debounce: prevent double trigger within 1 second
         current_time = time.time()
@@ -1297,11 +1538,14 @@ class MainWindowV2(QMainWindow):
             return
         self._last_toggle_time = current_time
         
+        log.info(f"[TOGGLE] is_recording={self.is_recording}")
+        
         if not self.is_recording:
             self._start_recording()
         else:
             self._stop_recording()
     
+    @pyqtSlot()
     def _cancel_recording(self):
         """Cancel recording without transcription (discard audio)."""
         if not self.is_recording:
@@ -1337,28 +1581,40 @@ class MainWindowV2(QMainWindow):
         self.is_recording = True
         self._play_sound()
         
-        # Инициализируем pre-upload
-        self._pre_upload_started = False
-        self._pre_uploaded_file = None
+        # Initialize Chunked transcriber for parallel processing
         self._streaming_frames = []
         
-        # Настраиваем callback для сбора frames
-        self.recorder.on_chunk_callback = self._on_audio_chunk
-        self.recorder.start_recording()
+        # Get proxy if configured
+        proxy_url = self.proxy_input.text().strip() if self.proxy_input.text().strip() else None
+        model = self.model_combo.currentData() or "gemini-2.5-flash"
+        language = self.language_combo.currentData() or "Russian"
         
-        # Запускаем таймер для pre-upload через 1.5 секунды
-        self._pre_upload_timer = QTimer()
-        self._pre_upload_timer.setSingleShot(True)
-        self._pre_upload_timer.timeout.connect(self._start_pre_upload)
-        self._pre_upload_timer.start(1500)
+        # Create ChunkedTranscriber for fast parallel transcription
+        self._chunked_transcriber = ChunkedTranscriber(
+            api_key=self.api_key_input.text().strip(),
+            model=model,
+            proxy_url=proxy_url,
+            language=language,
+            on_chunk_result=self._on_chunk_result,
+            on_error=self._on_chunked_error
+        )
+        
+        # Start chunked transcriber
+        self._chunked_transcriber.start()
+        
+        # Configure recorder callback to send chunks
+        self.recorder.on_chunk_callback = self._on_audio_chunk_live
+        self.recorder.start_recording()
         
         self.record_btn.setText("Остановить запись")
         self.record_btn.setStyleSheet(f"background-color: {self.COLORS['error']};")
         self.status_label.setText("Запись...")
         
+        # Clear real-time text
+        self.recording_widget.clear_realtime_text()
+        
         # Show recording widget if setting is enabled (without stealing focus)
         if self.show_widget_on_record_cb.isChecked():
-            # Show without activating to keep focus in current text field
             self.recording_widget.setWindowFlags(
                 self.recording_widget.windowFlags() | Qt.WindowType.WindowDoesNotAcceptFocus
             )
@@ -1366,25 +1622,49 @@ class MainWindowV2(QMainWindow):
             self.recording_widget.raise_()
         
         # Update recording widget
+        log.info(f"[WIDGET] Calling set_recording(), widget visible={self.recording_widget.isVisible()}")
         self.recording_widget.set_recording()
+        log.info(f"[WIDGET] set_recording() done, state={self.recording_widget._state}")
     
-    def _on_audio_chunk(self, chunk: bytes):
-        """Callback вызывается для каждого chunk аудио во время записи."""
+    def _on_audio_chunk_live(self, chunk: bytes):
+        """Callback for chunked transcriber - sends chunks for parallel processing."""
         self._streaming_frames.append(chunk)
         
-        # Вычисляем уровень громкости для анимации waveform
+        # Send to chunked transcriber
+        if hasattr(self, '_chunked_transcriber') and self._chunked_transcriber:
+            self._chunked_transcriber.add_audio(chunk)
+        
+        # Calculate audio level for waveform animation
         try:
             audio_data = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
-            # RMS уровень
             rms = np.sqrt(np.mean(audio_data ** 2))
-            # Нормализация: тишина ~100-500, речь ~1000-8000
             level = min(1.0, max(0.0, (rms - 200) / 3000))
-            
-
-            
-            self.recording_widget.waveform.set_level(level)
+            self.signals.audio_level.emit(level)
         except Exception as e:
             print(f"Audio chunk error: {e}")
+    
+    def _on_chunk_result(self, chunk_idx: int, text: str):
+        """Callback for chunk transcription result."""
+        log.debug(f"[CHUNKED] Chunk {chunk_idx} result: {text[:50]}...")
+        
+        # Update UI if real-time display is enabled (call directly, already thread-safe via signal)
+        if self.show_realtime_text_cb.isChecked() and hasattr(self, '_chunked_transcriber'):
+            partial = self._chunked_transcriber.get_partial_result()
+            # Use signals.status_update instead of direct method call
+            self.signals.status_update.emit(f"Чанк {chunk_idx}: {len(text)} символов")
+    
+    def _on_chunked_error(self, error: str):
+        """Callback for chunked transcriber errors."""
+        log.error(f"[CHUNKED] Error: {error}")
+        self.signals.error.emit(f"Transcription: {error[:40]}")
+    
+    def _on_audio_chunk(self, chunk: bytes):
+        """Legacy callback - redirects to live version."""
+        self._on_audio_chunk_live(chunk)
+    
+    def _on_audio_level(self, level: float):
+        """Handle audio level signal in main thread."""
+        self.recording_widget.waveform.set_level(level)
     
     def _start_pre_upload(self):
         """Начинаем upload аудио пока ещё идёт запись."""
@@ -1396,113 +1676,132 @@ class MainWindowV2(QMainWindow):
         threading.Thread(target=self._do_pre_upload, daemon=True).start()
     
     def _do_pre_upload(self):
-        """Pre-upload текущего аудио в фоне."""
-        import soundfile as sf
-        try:
-            frames = list(self._streaming_frames)
-            if not frames:
-                return
-            
-            # Сохраняем во временный FLAC файл (сжатие ~2x)
-            temp_file = os.path.join(tempfile.gettempdir(), "gvw_preupload.flac")
-            params = self.recorder.get_audio_params()
-            
-            # Конвертируем в numpy и сохраняем как FLAC
-            audio_data = np.frombuffer(b''.join(frames), dtype=np.int16)
-            sf.write(temp_file, audio_data, params['sample_rate'], format='FLAC')
-            
-            # Конфигурируем genai
-            api_key = self.api_key_input.text().strip()
-            genai.configure(api_key=api_key)
-            
-            # Загружаем файл
-            self._pre_uploaded_file = genai.upload_file(path=temp_file)
-            print(f"Pre-upload done: {len(frames)} frames, {os.path.getsize(temp_file)/1024:.1f} KB")
-            
-        except Exception as e:
-            print(f"Pre-upload error: {e}")
-            self._pre_uploaded_file = None
+        """Pre-upload disabled - using REST API with inline_data instead."""
+        # Pre-upload через genai.upload_file() не работает из-за региональных ограничений
+        # REST API использует inline_data, поэтому pre-upload не нужен
+        self._pre_uploaded_file = None
+        pass
     
     def _stop_recording(self):
         log.info("Stopping recording")
         self.is_recording = False
         self._play_sound()
         
-        # Останавливаем таймер pre-upload если ещё не сработал
-        if hasattr(self, '_pre_upload_timer'):
-            self._pre_upload_timer.stop()
-        
         self.record_btn.setText("Начать запись")
         self.record_btn.setStyleSheet("")
         self.status_label.setText("Завершение...")
         
-        # Задержка 500мс для захвата последних слов перед остановкой записи
-        QTimer.singleShot(500, self._finish_recording)
+        # Small delay to capture last words
+        QTimer.singleShot(300, self._finish_recording)
     
     def _finish_recording(self):
-        """Actually stop recording after delay to capture last words."""
+        """Stop recording and get transcription from chunked transcriber."""
         audio_file, duration = self.recorder.stop_recording()
-        self.recorder.on_chunk_callback = None  # Убираем callback
+        self.recorder.on_chunk_callback = None
         
         # Store audio file path for history
         self._last_audio_file = audio_file
         
         self.status_label.setText("Обработка...")
-        
-        # Update recording widget
-        self.recording_widget.set_processing()
+        self.recording_widget.set_processing(duration)
         self._transcription_start_time = time.time()
         
-        if audio_file:
-            threading.Thread(target=self._process_audio, args=(audio_file, duration)).start()
+        # Get transcription from chunked transcriber
+        if hasattr(self, '_chunked_transcriber') and self._chunked_transcriber:
+            # Stop chunked transcriber and get result
+            threading.Thread(
+                target=self._finish_chunked_transcription,
+                args=(audio_file, duration),
+                daemon=True
+            ).start()
+        else:
+            # Fallback to REST API if chunked not available
+            if audio_file:
+                threading.Thread(target=self._process_audio, args=(audio_file, duration)).start()
+    
+    def _finish_chunked_transcription(self, audio_file, duration):
+        """Finish chunked transcription and emit result."""
+        try:
+            # Stop transcriber and get final combined text
+            text = self._chunked_transcriber.stop()
+            
+            if text:
+                log.info(f"[CHUNKED] Final transcription: {len(text)} chars")
+                cost = (duration / 60.0) * 0.0015
+                self.signals.finished.emit(text, duration, cost)
+            else:
+                log.warning("[CHUNKED] No transcription received, falling back to REST API")
+                # Fallback to REST API
+                self._process_audio_standard(audio_file, duration)
+                
+        except Exception as e:
+            log.error(f"[CHUNKED] Finish error: {e}")
+            # Fallback to REST API
+            self._process_audio_standard(audio_file, duration)
+        finally:
+            self._chunked_transcriber = None
     
     def _process_audio(self, audio_file, duration):
-        """Process audio using Standard API with selected model."""
+        """Process audio using REST API (fallback)."""
         model = self.model_combo.currentData() or "gemini-2.5-flash"
-        log.info(f"Processing audio: {audio_file}, duration: {duration:.1f}s, model: {model}")
+        log.info(f"Processing audio (REST fallback): {audio_file}, duration: {duration:.1f}s, model: {model}")
         self._process_audio_standard(audio_file, duration)
     
     def _process_audio_standard(self, audio_file, duration):
-        """Process audio using standard Gemini API with inline data."""
+        """Process audio using direct REST API (bypasses SDK regional restrictions)."""
         try:
             import base64
+            import requests
             t0 = time.time()
             
             api_key = self.api_key_input.text().strip()
             model = self.model_combo.currentData() or "gemini-2.5-flash"
             cost = (duration / 60.0) * 0.0015
             
-            genai.configure(api_key=api_key)
-            genai_model = genai.GenerativeModel(model)
-            
             # Замер: размер файла
             file_size = os.path.getsize(audio_file) / 1024
             log.debug(f"Audio file size: {file_size:.1f} KB")
             
-            # Используем inline data
+            # Читаем и кодируем аудио
             t1 = time.time()
             with open(audio_file, 'rb') as f:
                 audio_bytes = f.read()
             
             mime_type = "audio/flac" if audio_file.endswith('.flac') else "audio/wav"
-            audio_part = {
-                "inline_data": {
-                    "mime_type": mime_type,
-                    "data": base64.b64encode(audio_bytes).decode('utf-8')
-                }
-            }
+            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
             t2 = time.time()
             log.debug(f"Audio prepare time: {t2-t1:.3f}s")
             
-            # Transcription
-            response = genai_model.generate_content([
-                "Transcribe this audio exactly as spoken. Return ONLY the text.",
-                audio_part
-            ])
-            t3 = time.time()
-            log.info(f"Transcription completed in {t3-t2:.2f}s (total: {t3-t0:.2f}s)")
+            # Прямой REST API запрос (обходит ограничения SDK)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": "Transcribe this audio exactly as spoken. Return ONLY the text."},
+                        {"inline_data": {"mime_type": mime_type, "data": audio_base64}}
+                    ]
+                }]
+            }
             
-            text = response.text.strip() if response.text else ""
+            # Proxy support
+            proxies = None
+            proxy_url = self.proxy_input.text().strip()
+            if proxy_url:
+                proxies = {"http": proxy_url, "https": proxy_url}
+                log.info(f"Using proxy: {proxy_url[:30]}...")
+            
+            response = requests.post(url, json=payload, timeout=60, proxies=proxies)
+            t3 = time.time()
+            
+            if response.status_code != 200:
+                error_msg = response.json().get('error', {}).get('message', response.text)
+                raise Exception(f"API error {response.status_code}: {error_msg}")
+            
+            result = response.json()
+            text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            text = text.strip()
+            
+            log.info(f"Transcription completed in {t3-t2:.2f}s (total: {t3-t0:.2f}s)")
             log.info(f"Transcribed {len(text)} characters")
             self.signals.finished.emit(text, duration, cost)
             
@@ -1541,30 +1840,62 @@ class MainWindowV2(QMainWindow):
         
         # Вставляем в текстовое поле (если включено)
         if need_paste:
-            QTimer.singleShot(50, self._do_paste)
-            # Обновляем UI после вставки
-            QTimer.singleShot(300, self._do_update_ui)
+            # Большая задержка (300ms) чтобы фокус вернулся в текстовое поле
+            QTimer.singleShot(300, self._do_paste)
+            # Обновляем UI после вставки (увеличено до 1000ms)
+            QTimer.singleShot(1000, self._do_update_ui)
         else:
             # Обновляем UI сразу
             QTimer.singleShot(100, self._do_update_ui)
     
     def _do_paste(self):
-        """Paste text to active text field."""
-        print("[PASTE] Starting paste...")
+        """Paste text to active text field using Windows API."""
+        # Prevent double paste - check if already pasted recently
+        current_time = time.time()
+        last_paste = getattr(self, '_last_paste_time', 0)
+        if current_time - last_paste < 1.0:
+            log.warning(f"[PASTE] Skipping duplicate paste ({current_time - last_paste:.2f}s since last)")
+            return
+        self._last_paste_time = current_time
         
-        # Отпускаем все модификаторы
-        keyboard.release('alt')
-        keyboard.release('ctrl')
-        keyboard.release('shift')
-        time.sleep(0.15)
+        log.info("[PASTE] Starting paste...")
         
-        # Вставляем через keyboard (более надёжно на Windows)
         try:
-            keyboard.send('ctrl+v')
-            print("[PASTE] Sent ctrl+v via keyboard")
+            import ctypes
+            
+            # Windows API constants
+            VK_CONTROL = 0x11
+            VK_V = 0x56
+            KEYEVENTF_KEYUP = 0x0002
+            
+            user32 = ctypes.windll.user32
+            
+            # Отпускаем все модификаторы через Windows API
+            user32.keybd_event(0x12, 0, KEYEVENTF_KEYUP, 0)  # Alt up
+            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
+            user32.keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0)  # Shift up
+            
+            time.sleep(0.3)
+            
+            # Отправляем Ctrl+V через Windows API
+            user32.keybd_event(VK_CONTROL, 0, 0, 0)  # Ctrl down
+            time.sleep(0.05)
+            user32.keybd_event(VK_V, 0, 0, 0)  # V down
+            time.sleep(0.05)
+            user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)  # V up
+            time.sleep(0.05)
+            user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)  # Ctrl up
+            
+            log.info("[PASTE] Sent ctrl+v via Windows API")
+            
         except Exception as e:
-            print(f"[PASTE] keyboard failed: {e}, trying pyautogui")
-            pyautogui.hotkey('ctrl', 'v')
+            log.warning(f"[PASTE] Windows API failed: {e}, trying pyautogui")
+            try:
+                pyautogui.FAILSAFE = False
+                pyautogui.hotkey('ctrl', 'v', interval=0.1)
+                log.info("[PASTE] Sent ctrl+v via pyautogui (fallback)")
+            except Exception as e2:
+                log.error(f"[PASTE] All methods failed: {e2}")
         
         # Восстанавливаем старое содержимое буфера если нужно
         if getattr(self, '_restore_clipboard', False):
@@ -1633,6 +1964,15 @@ class MainWindowV2(QMainWindow):
     def _quit(self):
         log.info("Application closing")
         self._save_settings()
+        
+
+        
+        # Unregister all hotkeys
+        try:
+            keyboard.unhook_all_hotkeys()
+        except:
+            pass
+        
         # Close database connection
         if hasattr(self, 'history_manager'):
             self.history_manager.close()

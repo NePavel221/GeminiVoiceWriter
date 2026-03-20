@@ -26,13 +26,11 @@ class HistoryManager:
         """Initialize database connection.
         
         Args:
-            db_path: Path to SQLite database. If None, uses %APPDATA%/GeminiVoiceWriter/history.db
+            db_path: Path to SQLite database. If None, uses portable path next to exe.
         """
         if db_path is None:
-            app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
-            db_dir = os.path.join(app_data, 'GeminiVoiceWriter')
-            os.makedirs(db_dir, exist_ok=True)
-            self.db_path = os.path.join(db_dir, 'history.db')
+            from utils.paths import get_database_path
+            self.db_path = get_database_path()
         else:
             self.db_path = db_path
             # Ensure directory exists

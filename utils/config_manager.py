@@ -15,7 +15,8 @@ class ConfigManager:
             "openai": ""
         },
         "model": "gemini-2.5-flash",
-        "hotkey": "ctrl+alt",
+        "hotkey": "alt+`",
+        "cancel_hotkey": "alt+1",
         "hotkey_mode": "toggle",
         "audio_device": None,
         "output_mode": "inject",

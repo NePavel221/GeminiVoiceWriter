@@ -32,7 +32,7 @@ class HotkeyManager:
         self._hotkey: Optional[str] = None
         self._running = False
         self._last_trigger_time = 0
-        self._cooldown = 0.3  # Prevent double triggering
+        self._cooldown = 1.0  # Prevent double triggering (1 second)
         
         # Callbacks
         self.on_press: Optional[Callable[[], None]] = None

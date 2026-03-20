@@ -700,7 +700,7 @@ class MainWindow(QMainWindow):
                 with open(settings_path, "r") as f:
                     settings = json.load(f)
                     self.api_key_input.setText(settings.get("api_key", ""))
-                    self.hotkey_input.setText(settings.get("hotkey", "alt+1"))
+                    self.hotkey_input.setText(settings.get("hotkey", "alt+`"))
                     
                     model_id = settings.get("model", "gemini-2.5-flash")
                     # Find by data

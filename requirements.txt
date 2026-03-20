@@ -1,5 +1,7 @@
 # Core dependencies
 google-generativeai
+google-genai>=1.0.0    # New unified SDK with Live API
+websockets             # WebSocket with proxy support
 pyaudio
 keyboard
 pyautogui

@@ -267,6 +267,11 @@ class RecordingWidget(QWidget):
         self._processing_timer.timeout.connect(self._update_processing_time)
         self._processing_timer.setInterval(100)
         
+        # Idle timer (can be cancelled when new recording starts)
+        self._idle_timer = QTimer()
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.timeout.connect(self.set_idle)
+        
         self._setup_window()
         self._setup_ui()
         self._position_widget()
@@ -326,6 +331,21 @@ class RecordingWidget(QWidget):
             }
         """)
         center_layout.addWidget(self.status_label)
+        
+        # Real-time transcription text (hidden by default)
+        self.realtime_label = QLabel("")
+        self.realtime_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.realtime_label.setWordWrap(True)
+        self.realtime_label.setMaximumWidth(200)
+        self.realtime_label.setStyleSheet("""
+            QLabel {
+                color: #4285F4;
+                font-size: 11px;
+                font-family: 'Segoe UI', sans-serif;
+            }
+        """)
+        self.realtime_label.hide()
+        center_layout.addWidget(self.realtime_label)
         
         main_layout.addWidget(center_widget, 1)
         
@@ -409,6 +429,9 @@ class RecordingWidget(QWidget):
         painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 20, 20)
     
     def set_recording(self):
+        # Cancel any pending idle timer from previous session
+        self._idle_timer.stop()
+        
         self._state = RecordingState.RECORDING
         self._recording_seconds = 0.0
         self.waveform.start()
@@ -416,10 +439,15 @@ class RecordingWidget(QWidget):
         self.mic_btn.set_recording(True)
         self._update_status()
         self.update()
+        print(f"[WIDGET] set_recording() called, state={self._state}")
     
-    def set_processing(self):
+    def set_processing(self, actual_duration: float = None):
         self._state = RecordingState.PROCESSING
-        self._last_recording_duration = self._recording_seconds  # Save recording duration
+        # Use actual duration from recorder if provided, otherwise use internal timer
+        if actual_duration is not None:
+            self._last_recording_duration = actual_duration
+        else:
+            self._last_recording_duration = self._recording_seconds
         self._processing_seconds = 0.0
         self.waveform.stop()
         self._recording_timer.stop()
@@ -443,9 +471,11 @@ class RecordingWidget(QWidget):
         self.status_label.setStyleSheet("QLabel { color: #34A853; font-size: 12px; }")
         self.tray_text_changed.emit(f"✓ Готово!")
         self.update()
-        QTimer.singleShot(3000, self.set_idle)
+        # Use managed timer that can be cancelled
+        self._idle_timer.start(3000)
     
     def set_idle(self):
+        print(f"[WIDGET] set_idle() called, current state={self._state}")
         self._state = RecordingState.IDLE
         self._recording_timer.stop()
         self._processing_timer.stop()
@@ -466,7 +496,8 @@ class RecordingWidget(QWidget):
         self.status_label.setStyleSheet("QLabel { color: #EA4335; font-size: 12px; }")
         self.tray_text_changed.emit(f"✗ Ошибка")
         self.update()
-        QTimer.singleShot(3000, self.set_idle)
+        # Use managed timer that can be cancelled
+        self._idle_timer.start(3000)
     
     def _update_recording_time(self):
         self._recording_seconds += 0.1
@@ -505,3 +536,20 @@ class RecordingWidget(QWidget):
     
     def mouseReleaseEvent(self, event: QMouseEvent):
         self._drag_position = None
+    
+    def set_realtime_text(self, text: str):
+        """Update real-time transcription text."""
+        if text:
+            # Show last 50 chars with ellipsis
+            display_text = text[-50:] if len(text) > 50 else text
+            if len(text) > 50:
+                display_text = "..." + display_text
+            self.realtime_label.setText(display_text)
+            self.realtime_label.show()
+        else:
+            self.realtime_label.hide()
+    
+    def clear_realtime_text(self):
+        """Clear real-time transcription text."""
+        self.realtime_label.setText("")
+        self.realtime_label.hide()

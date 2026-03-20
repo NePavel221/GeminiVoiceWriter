@@ -3,15 +3,7 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
-from PyQt6.QtCore import QStandardPaths
-
-
-def get_log_dir() -> str:
-    """Get directory for log files."""
-    app_data = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppConfigLocation)
-    log_dir = os.path.join(app_data, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    return log_dir
+from utils.paths import get_logs_dir
 
 
 def setup_logger(name: str = "GeminiVoiceWriter") -> logging.Logger:
@@ -37,7 +29,7 @@ def setup_logger(name: str = "GeminiVoiceWriter") -> logging.Logger:
     logger.addHandler(console_handler)
     
     # File handler (DEBUG and above, rotating)
-    log_dir = get_log_dir()
+    log_dir = get_logs_dir()
     log_file = os.path.join(log_dir, "app.log")
     
     file_handler = RotatingFileHandler(

@@ -1333,16 +1333,21 @@ class MainWindowV2(QMainWindow):
         return os.path.join(os.path.dirname(settings_path), "internal_proxy.json")
 
     def _load_internal_proxy(self):
-        path = self._get_internal_proxy_path()
-        if not os.path.exists(path):
-            return ""
-        try:
-            with open(path, encoding='utf-8') as f:
-                data = json.load(f)
-            return (data.get("proxy") or "").strip()
-        except Exception as e:
-            log.warning(f"Failed to load internal proxy config: {e}")
-            return ""
+        candidate_paths = [self._get_internal_proxy_path()]
+        app_dir_proxy = os.path.join(os.path.dirname(self._get_settings_path()), "..", "internal_proxy.json")
+        candidate_paths.append(os.path.normpath(app_dir_proxy))
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, encoding='utf-8') as f:
+                    data = json.load(f)
+                proxy_value = (data.get("proxy") or "").strip()
+                if proxy_value:
+                    return proxy_value
+            except Exception as e:
+                log.warning(f"Failed to load internal proxy config from {path}: {e}")
+        return ""
 
     def _save_internal_proxy(self, proxy_value):
         path = self._get_internal_proxy_path()
@@ -1485,7 +1490,7 @@ class MainWindowV2(QMainWindow):
                     if not self._load_internal_proxy():
                         self._save_internal_proxy(legacy_proxy)
                 else:
-                    proxy_mode = "custom"
+                    proxy_mode = "built_in"
 
             if proxy_mode == "custom":
                 self.proxy_input.setText(custom_proxy or legacy_proxy)
@@ -1503,13 +1508,17 @@ class MainWindowV2(QMainWindow):
             self.auto_paste_cb.setChecked(s.get("auto_paste", True))
             self.auto_copy_cb.setChecked(s.get("auto_copy", True))
                 
-            # Load model - try index first, then data
+            # Load model - try index first, then data, otherwise use explicit default
+            default_model = "gemini-3-flash-preview"
             model_idx = s.get("model_index", -1)
             if model_idx >= 0 and model_idx < self.model_combo.count():
                 self.model_combo.setCurrentIndex(model_idx)
             else:
-                idx = self.model_combo.findData(s.get("model"))
-                if idx >= 0: 
+                model_value = s.get("model") or default_model
+                idx = self.model_combo.findData(model_value)
+                if idx < 0:
+                    idx = self.model_combo.findData(default_model)
+                if idx >= 0:
                     self.model_combo.setCurrentIndex(idx)
             print(f"[SETTINGS] Loaded model: {self.model_combo.currentData()} (index {self.model_combo.currentIndex()})")
             

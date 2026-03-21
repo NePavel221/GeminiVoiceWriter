@@ -344,19 +344,25 @@ class MainWindowV2(QMainWindow):
         
         # Proxy settings
         card_layout.addSpacing(10)
-        proxy_label = QLabel("Proxy (опционально)")
+        proxy_label = QLabel("Proxy")
         proxy_label.setObjectName("fieldLabel")
         card_layout.addWidget(proxy_label)
-        
+
+        self.proxy_mode_combo = QComboBox()
+        self.proxy_mode_combo.setObjectName("input")
+        self.proxy_mode_combo.addItem("Встроенный", "built_in")
+        self.proxy_mode_combo.addItem("Свой", "custom")
+        card_layout.addWidget(self.proxy_mode_combo)
+
         self.proxy_input = QLineEdit()
         self.proxy_input.setPlaceholderText("http://login:password@ip:port")
         self.proxy_input.setObjectName("input")
         card_layout.addWidget(self.proxy_input)
-        
-        proxy_hint = QLabel("Оставьте пустым для прямого подключения")
-        proxy_hint.setStyleSheet("color: #6b7280; font-size: 11px;")
-        card_layout.addWidget(proxy_hint)
-        
+
+        self.proxy_hint_label = QLabel("Встроенный proxy используется скрыто. Для своего proxy укажи полный URL.")
+        self.proxy_hint_label.setStyleSheet("color: #6b7280; font-size: 11px;")
+        card_layout.addWidget(self.proxy_hint_label)
+
         layout.addWidget(card)
         
         self.save_btn = QPushButton("Сохранить настройки")
@@ -788,7 +794,7 @@ class MainWindowV2(QMainWindow):
             
             # Proxy support
             proxies = None
-            proxy_url = self.proxy_input.text().strip()
+            proxy_url = self._get_effective_proxy()
             if proxy_url:
                 proxies = {"http": proxy_url, "https": proxy_url}
             
@@ -1321,12 +1327,62 @@ class MainWindowV2(QMainWindow):
     def _get_settings_path(self):
         from utils.paths import get_settings_path
         return get_settings_path()
+
+    def _get_internal_proxy_path(self):
+        settings_path = self._get_settings_path()
+        return os.path.join(os.path.dirname(settings_path), "internal_proxy.json")
+
+    def _load_internal_proxy(self):
+        path = self._get_internal_proxy_path()
+        if not os.path.exists(path):
+            return ""
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+            return (data.get("proxy") or "").strip()
+        except Exception as e:
+            log.warning(f"Failed to load internal proxy config: {e}")
+            return ""
+
+    def _save_internal_proxy(self, proxy_value):
+        path = self._get_internal_proxy_path()
+        try:
+            with open(path, "w", encoding='utf-8') as f:
+                json.dump({"proxy": (proxy_value or "").strip()}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            log.warning(f"Failed to save internal proxy config: {e}")
+
+    def _get_selected_proxy_mode(self):
+        if not hasattr(self, 'proxy_mode_combo'):
+            return "custom"
+        return self.proxy_mode_combo.currentData() or "custom"
+
+    def _get_effective_proxy(self):
+        mode = self._get_selected_proxy_mode()
+        if mode == "built_in":
+            proxy_value = self._load_internal_proxy()
+            return proxy_value or None
+        proxy_value = self.proxy_input.text().strip()
+        return proxy_value or None
+
+    def _update_proxy_ui(self):
+        mode = self._get_selected_proxy_mode()
+        is_custom = mode == "custom"
+        self.proxy_input.setVisible(is_custom)
+        self.proxy_input.setEnabled(is_custom)
+        if hasattr(self, 'proxy_hint_label'):
+            if is_custom:
+                self.proxy_hint_label.setText("Укажи свой proxy в формате http://login:password@ip:port")
+            else:
+                self.proxy_hint_label.setText("Встроенный proxy активен. Его данные скрыты.")
     
     def _save_settings(self):
         # Note: history is now stored in SQLite database, not in JSON
         settings = {
             "api_key": self.api_key_input.text(),
-            "proxy": self.proxy_input.text(),
+            "proxy_mode": self._get_selected_proxy_mode(),
+            "custom_proxy": self.proxy_input.text().strip(),
+            "proxy": self.proxy_input.text().strip(),
             "hotkey": self.hotkey_input.text(),
             "cancel_hotkey": self.cancel_hotkey_input.text(),
             "auto_paste": self.auto_paste_cb.isChecked(),
@@ -1390,6 +1446,9 @@ class MainWindowV2(QMainWindow):
     def _connect_settings_signals(self):
         """Connect all settings widgets to change tracking."""
         self.api_key_input.textChanged.connect(self._on_setting_changed)
+        self.proxy_mode_combo.currentIndexChanged.connect(self._on_setting_changed)
+        self.proxy_mode_combo.currentIndexChanged.connect(self._update_proxy_ui)
+        self.proxy_input.textChanged.connect(self._on_setting_changed)
         self.model_combo.currentIndexChanged.connect(self._on_setting_changed)
         self.auto_paste_cb.stateChanged.connect(self._on_setting_changed)
         self.auto_copy_cb.stateChanged.connect(self._on_setting_changed)
@@ -1415,7 +1474,30 @@ class MainWindowV2(QMainWindow):
             
             # Apply settings (defaults used if not in file)
             self.api_key_input.setText(s.get("api_key", ""))
-            self.proxy_input.setText(s.get("proxy", ""))
+
+            legacy_proxy = (s.get("proxy") or "").strip()
+            custom_proxy = (s.get("custom_proxy") or "").strip()
+            proxy_mode = s.get("proxy_mode")
+
+            if not proxy_mode:
+                if legacy_proxy:
+                    proxy_mode = "built_in"
+                    if not self._load_internal_proxy():
+                        self._save_internal_proxy(legacy_proxy)
+                else:
+                    proxy_mode = "custom"
+
+            if proxy_mode == "custom":
+                self.proxy_input.setText(custom_proxy or legacy_proxy)
+            else:
+                self.proxy_input.setText(custom_proxy)
+
+            proxy_mode_index = self.proxy_mode_combo.findData(proxy_mode)
+            if proxy_mode_index < 0:
+                proxy_mode_index = 0
+            self.proxy_mode_combo.setCurrentIndex(proxy_mode_index)
+            self._update_proxy_ui()
+
             self.hotkey_input.setText(s.get("hotkey", "alt+`"))
             self.cancel_hotkey_input.setText(s.get("cancel_hotkey", "alt+1"))
             self.auto_paste_cb.setChecked(s.get("auto_paste", True))
@@ -1610,7 +1692,7 @@ class MainWindowV2(QMainWindow):
         self._streaming_frames = []
         
         # Get proxy if configured
-        proxy_url = self.proxy_input.text().strip() if self.proxy_input.text().strip() else None
+        proxy_url = self._get_effective_proxy()
         model = self.model_combo.currentData() or "gemini-2.5-flash"
         language = self.language_combo.currentData() or "Russian"
         
@@ -1810,10 +1892,10 @@ class MainWindowV2(QMainWindow):
             
             # Proxy support
             proxies = None
-            proxy_url = self.proxy_input.text().strip()
+            proxy_url = self._get_effective_proxy()
             if proxy_url:
                 proxies = {"http": proxy_url, "https": proxy_url}
-                log.info(f"Using proxy: {proxy_url[:30]}...")
+                log.info("Using configured proxy mode for request")
             
             response = requests.post(url, json=payload, timeout=60, proxies=proxies)
             t3 = time.time()

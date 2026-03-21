@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.ico', '.'), ('ui/checkmark.svg', 'ui'), ('assets/sounds', 'assets/sounds')],
+    datas=[('icon.ico', '.'), ('ui/checkmark.svg', 'ui'), ('assets/sounds', 'assets/sounds'), ('internal_proxy.json', '.')],
     hiddenimports=['PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets'],
     hookspath=[],
     hooksconfig={},

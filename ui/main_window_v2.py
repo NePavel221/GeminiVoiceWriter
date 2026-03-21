@@ -1336,6 +1336,9 @@ class MainWindowV2(QMainWindow):
         candidate_paths = [self._get_internal_proxy_path()]
         app_dir_proxy = os.path.join(os.path.dirname(self._get_settings_path()), "..", "internal_proxy.json")
         candidate_paths.append(os.path.normpath(app_dir_proxy))
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidate_paths.append(os.path.join(meipass, 'internal_proxy.json'))
         for path in candidate_paths:
             if not os.path.exists(path):
                 continue
